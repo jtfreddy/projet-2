@@ -1,1 +1,19 @@
+def correct_pos_format(string):
+  if type(string) = 
+  
 
+class Player:
+  def self (color,name)
+    self.name = name
+    self.color = color
+
+  def askMove ()
+    while True do:
+      move = input(f"{self.name} ({'Blanc' if self.color == 0 else 'Noir'}), entrez votre coup : ")
+
+      pos = move.split()
+
+      if len(pos) == 2 and correct_pos_format(pos[0]) and correct_pos_format(pos[1]):
+                return pos
+            else:
+                print("Format invalide. Exemple : Nb1 Nc3")
