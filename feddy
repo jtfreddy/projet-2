@@ -1,2 +1,36 @@
+from abc import ABC, abstractmethod
+from datetime import datetime
+import math
+
+
+class Position:
+    def __init__(self, column, row):
+        if column not in "ABCDEFGH":
+            raise ValueError("La colonne doit être entre 'a' et 'h'")
+        if not (1 <= row <= 8):
+            raise ValueError("La ligne doit être entre 1 et 8")
+
+        self.column = column
+        self.row = row
+
+    def __str__(self):
+        return "La pièce est à la position" + str({self.column}) + str({self.row})
+
+
+class Piece (ABC):
+
+    @abstractmethod
+    def Bouger(self):
+        pass
+
 class Knight (Piece):
-  
+    def __init__ (self, position, color):
+        self.position = position
+        self.color = color
+
+    def  isValidMove(self, actuelposition, newPosition, board):
+        listpos = []
+        c = actuelposition[0]
+        r = actuelposition[1]
+        for pos in self.actuelposition:
+            
