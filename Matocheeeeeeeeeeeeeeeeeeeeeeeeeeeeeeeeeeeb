@@ -1,6 +1,22 @@
 def correct_pos_format(string):
-  if type(string) = 
-  
+    if not isinstance(string, str):
+        return False
+    if len(string) == 3:
+        piece, col, row = string[0], string[1], string[2]
+        return (
+            piece.upper() in "KQBNRP" and
+            col in "abcdefgh" and
+            row in "12345678"
+        )
+    elif len(string) == 2:
+        col, row = string[0], string[1]
+        return (
+            col in "abcdefgh" and
+            row in "12345678"
+        )
+
+    return False
+
 
 class Player:
   def self (color,name)
