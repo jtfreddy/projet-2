@@ -33,3 +33,29 @@ class Player:
                 return pos
             else:
                 print("Format invalide. Exemple : Nb1 Nc3")
+
+class Board:
+    def __init__(self):
+        self.grid = {}
+
+    def addPiece(self, piece):
+        self.grid[(piece.position.column, piece.position.row)] = piece
+
+    def getPiece(self, position):
+        return self.grid.get((position.column, position.row))
+
+    def movePiece(self, piece, newPosition):
+        if piece.isValidMove(newPosition, self):
+            old_pos = (piece.position.column, piece.position.row)
+            new_pos = (newPosition.column, newPosition.row)
+
+            # si une pièce adverse est là, elle est remplacée
+            if new_pos in self.grid:
+                del self.grid[new_pos]
+
+            del self.grid[old_pos]
+            piece.position = newPosition
+            self.grid[new_pos] = piece
+            return True
+
+        return False
