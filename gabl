@@ -1,1 +1,139 @@
+# =========================
+# Classe Position
+# =========================
+
+class Position:
+    def __init__(self, column, row):
+        self.column = column
+        self.row = row
+
+    def __str__(self):
+        return f"{self.column}{self.row}"
+
+
+# =========================
+# Classe Piece
+# =========================
+
+class Piece:
+    def __init__(self, position, color):
+        self.position = position
+        self.color = color # 0 = blanc, 1 = noir
+
+    def is_valid_move(self, new_position, board):
+        return False
+
+
+# =========================
+# Classe Tour
+# =========================
+
+class Rook(Piece):
+
+    def __str__(self):
+        return "R" if self.color == 0 else "r"
+
+    def is_valid_move(self, new_position, board):
+
+# Déplacement horizontal
+        if self.position.row == new_position.row:
+            return True
+
+# Déplacement vertical
+        if self.position.column == new_position.column:
+            return True
+
+        return False
+
+
+# =========================
+# Classe Fou
+# =========================
+
+class Bishop(Piece):
+
+    def __str__(self):
+        return "B" if self.color == 0 else "b"
+    
+    def is_valid_move(self, new_position, board):
+
+        col_diff = abs(ord(self.position.column) - ord(new_position.column))
+        row_diff = abs(self.position.row - new_position.row)
+
+# Déplacement en diagonale
+        return col_diff == row_diff
+
+
+# =========================
+# Classe Board
+# =========================
+
+class Board:
+
+    def __init__(self):
+
+        self.pieces = []
+
+# Tours
+        self.pieces.append(Rook(Position('a', 1), 0))
+        self.pieces.append(Rook(Position('h', 1), 0))
+
+        self.pieces.append(Rook(Position('a', 8), 1))
+        self.pieces.append(Rook(Position('h', 8), 1))
+
+# Fous
+        self.pieces.append(Bishop(Position('c', 1), 0))
+        self.pieces.append(Bishop(Position('f', 1), 0))
+
+        self.pieces.append(Bishop(Position('c', 8), 1))
+        self.pieces.append(Bishop(Position('f', 8), 1))
+
+
+    def get_piece(self, position):
+
+        for piece in self.pieces:
+            if (piece.position.column == position.column and piece.position.row == position.row):
+                return piece
+
+        return None
+
+
+# =========================
+# Classe Chess
+# =========================
+
+class Chess:
+
+    def __init__(self):
+        self.board = Board()
+
+    def display_board(self):
+
+        print("\n a b c d e f g h")
+
+        for row in range(8, 0, -1):
+
+            print(f"{row} ", end=" ")
+
+        for col in "abcdefgh":
+            piece = self.board.get_piece(Position(col, row))
+
+
+        if piece:
+            print(piece, end=" ")
+        else:
+       
+                print(".", end=" ")
+
+    print()
+
+    print()
+
+
+# =========================
+# Programme principal
+# =========================
+
+game = Chess()
+game.display_board()
 
