@@ -1,6 +1,6 @@
-# =========================
+
 # Classe Position
-# =========================
+
 
 class Position:
     def __init__(self, column, row):
@@ -11,9 +11,8 @@ class Position:
         return f"{self.column}{self.row}"
 
 
-# =========================
 # Classe Piece
-# =========================
+
 
 class Piece:
     def __init__(self, position, color):
@@ -24,9 +23,8 @@ class Piece:
         return False
 
 
-# =========================
 # Classe Tour
-# =========================
+
 
 class Rook(Piece):
 
@@ -45,10 +43,7 @@ class Rook(Piece):
 
         return False
 
-
-# =========================
 # Classe Fou
-# =========================
 
 class Bishop(Piece):
 
@@ -64,9 +59,9 @@ class Bishop(Piece):
         return col_diff == row_diff
 
 
-# =========================
+
 # Classe Board
-# =========================
+
 
 class Board:
 
@@ -98,9 +93,9 @@ class Board:
         return None
 
 
-# =========================
+
 # Classe Chess
-# =========================
+
 
 class Chess:
 
@@ -130,9 +125,9 @@ class Chess:
     print()
 
 
-# =========================
+
 # Programme principal
-# =========================
+
 
 game = Chess()
 game.display_board()
