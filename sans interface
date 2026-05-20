@@ -298,7 +298,7 @@ class Joueur:
     def __str__(self):
         return self.nom + (' (Blancs)' if self.couleur == BLANC else ' (Noirs)')
 
-    def demander_coup(self, plateau=None, jeu=None):
+    def demander_coup(self):
         c = 'Blancs' if self.couleur == BLANC else 'Noirs'
         print("[" + self.nom + " - " + c + "] Votre coup (ex: Pe2 Pe4) :")
         return input("  > ").strip()
