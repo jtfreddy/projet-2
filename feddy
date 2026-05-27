@@ -1,36 +1,607 @@
-from abc import ABC, abstractmethod
-from datetime import datetime
-import math
+import json, os, random, re
 
+# CONSTANTES
+COLONNES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+BLANC    = 0
+NOIR     = 1
+
+# Symboles affiches dans le terminal (majuscule=blanc, minuscule=noir)
+SYMBOLES = {
+    'K': ('K', 'k'),   # Roi
+    'Q': ('Q', 'q'),   # Reine
+    'R': ('R', 'r'),   # Tour
+    'B': ('B', 'b'),   # Fou
+    'N': ('N', 'n'),   # Cavalier
+    'P': ('P', 'p'),   # Pion
+}
+
+# POSITION
 
 class Position:
-    def __init__(self, column, row):
-        if column not in "ABCDEFGH":
-            raise ValueError("La colonne doit être entre 'a' et 'h'")
-        if not (1 <= row <= 8):
-            raise ValueError("La ligne doit être entre 1 et 8")
 
-        self.column = column
-        self.row = row
+    def __init__(self, colonne, rangee):
+        self.colonne = colonne   # lettre 'a' a 'h'
+        self.rangee  = rangee    # entier 1 a 8
+
+    def col_idx(self):
+        return COLONNES.index(self.colonne)
+
+    def ran_idx(self):
+        return self.rangee - 1
 
     def __str__(self):
-        return "La pièce est à la position" + str({self.column}) + str({self.row})
+        return self.colonne + str(self.rangee)
 
+    def __eq__(self, autre):
+        return (isinstance(autre, Position) and
+                self.colonne == autre.colonne and
+                self.rangee  == autre.rangee)
 
-class Piece (ABC):
+    def __hash__(self):
+        return hash((self.colonne, self.rangee))
 
-    @abstractmethod
-    def Bouger(self):
-        pass
+    def depuis_chaine(s):
+        return Position(s[0].lower(), int(s[1]))
 
-class Knight (Piece):
-    def __init__ (self, position, color):
+# PIECES
+
+class Piece:
+
+    def __init__(self, position, couleur):
         self.position = position
-        self.color = color
+        self.couleur  = couleur
 
-    def  isValidMove(self, actuelposition, newPosition, board):
-        listpos = []
-        c = actuelposition[0]
-        r = actuelposition[1]
-        for pos in self.actuelposition:
-            
+    def lettre(self):
+        return '?'
+
+    def __str__(self):
+        sym = SYMBOLES.get(self.lettre(), ('?', '?'))
+        return sym[0] if self.couleur == BLANC else sym[1]
+
+    def est_blanc(self):
+        return self.couleur == BLANC
+
+    def case_alliee(self, pos, plateau):
+        p = plateau.get_piece(pos)
+        return p is not None and p.couleur == self.couleur
+
+    def chemin_libre(self, dest, plateau):
+        c1, r1 = self.position.col_idx(), self.position.ran_idx()
+        c2, r2 = dest.col_idx(), dest.ran_idx()
+        dc = 0 if c2 == c1 else (1 if c2 > c1 else -1)
+        dr = 0 if r2 == r1 else (1 if r2 > r1 else -1)
+        c, r = c1 + dc, r1 + dr
+        while (c, r) != (c2, r2):
+            if plateau.get_piece(Position(COLONNES[c], r + 1)) is not None:
+                return False
+            c += dc
+            r += dr
+        return True
+
+    def coup_valide(self, dest, plateau):
+        return False
+
+
+class Roi(Piece):
+    def lettre(self): return 'K'
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        dc = abs(dest.col_idx() - self.position.col_idx())
+        dr = abs(dest.ran_idx() - self.position.ran_idx())
+        if dc <= 1 and dr <= 1 and dc + dr > 0: return True
+        if dr == 0 and dc == 2: return True   # roque, valide par Jeu
+        return False
+
+
+class Reine(Piece):
+    def lettre(self): return 'Q'
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        dc = abs(dest.col_idx() - self.position.col_idx())
+        dr = abs(dest.ran_idx() - self.position.ran_idx())
+        ok = (dc == 0 or dr == 0) and dc + dr > 0
+        ok = ok or (dc == dr and dc > 0)
+        return ok and self.chemin_libre(dest, plateau)
+
+
+class Fou(Piece):
+    def lettre(self): return 'B'
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        dc = abs(dest.col_idx() - self.position.col_idx())
+        dr = abs(dest.ran_idx() - self.position.ran_idx())
+        return dc == dr and dc > 0 and self.chemin_libre(dest, plateau)
+
+
+class Cavalier(Piece):
+    def lettre(self): return 'N'
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        dc = abs(dest.col_idx() - self.position.col_idx())
+        dr = abs(dest.ran_idx() - self.position.ran_idx())
+        return (dc == 2 and dr == 1) or (dc == 1 and dr == 2)
+
+
+class Tour(Piece):
+    def lettre(self): return 'R'
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        dc = abs(dest.col_idx() - self.position.col_idx())
+        dr = abs(dest.ran_idx() - self.position.ran_idx())
+        ok = (dc == 0 and dr > 0) or (dr == 0 and dc > 0)
+        return ok and self.chemin_libre(dest, plateau)
+
+
+class Pion(Piece):
+
+    def __init__(self, position, couleur):
+        super().__init__(position, couleur)
+        self.direction = 1 if couleur == BLANC else -1
+
+    def lettre(self): return 'P'
+
+    def rangee_depart(self):
+        if self.direction == 1: return self.position.ran_idx() == 1
+        return self.position.ran_idx() == 6
+
+    def coup_valide(self, dest, plateau):
+        if self.case_alliee(dest, plateau): return False
+        cn, rn = self.position.col_idx(), self.position.ran_idx()
+        cd, rd = dest.col_idx(), dest.ran_idx()
+        dc, dr = cd - cn, rd - rn
+        if dc == 0 and dr == self.direction:
+            return plateau.get_piece(dest) is None
+        if dc == 0 and dr == 2 * self.direction and self.rangee_depart():
+            mid = Position(COLONNES[cn], rn + self.direction + 1)
+            return plateau.get_piece(mid) is None and plateau.get_piece(dest) is None
+        if abs(dc) == 1 and dr == self.direction:
+            cible = plateau.get_piece(dest)
+            return cible is not None and cible.couleur != self.couleur
+        return False
+
+    def attaque_case(self, dest):
+        cn, rn = self.position.col_idx(), self.position.ran_idx()
+        return abs(dest.col_idx() - cn) == 1 and (dest.ran_idx() - rn) == self.direction
+
+    def est_en_promotion(self):
+        if self.direction == 1: return self.position.ran_idx() == 7
+        return self.position.ran_idx() == 0
+
+# PLATEAU
+
+CLASSES_PIECES = {'K': Roi, 'Q': Reine, 'R': Tour, 'B': Fou, 'N': Cavalier, 'P': Pion}
+
+class Plateau:
+
+    def __init__(self):
+        self.pieces     = {}    # dictionnaire Position -> Piece
+        self.capturees  = []    # liste des pieces capturees
+        self.deja_bouge = set() # pieces ayant deja bouge (pour le roque)
+        self.placer_pieces_initiales()
+
+    def placer_pieces_initiales(self):
+        ordre = [Tour, Cavalier, Fou, Reine, Roi, Fou, Cavalier, Tour]
+        for i, classe in enumerate(ordre):
+            col = COLONNES[i]
+            self.pieces[Position(col, 1)] = classe(Position(col, 1), BLANC)
+            self.pieces[Position(col, 8)] = classe(Position(col, 8), NOIR)
+        for col in COLONNES:
+            self.pieces[Position(col, 2)] = Pion(Position(col, 2), BLANC)
+            self.pieces[Position(col, 7)] = Pion(Position(col, 7), NOIR)
+
+    def get_piece(self, pos):
+        return self.pieces.get(pos, None)
+
+    def toutes_pieces(self, couleur=None):
+        if couleur is None: return list(self.pieces.values())
+        return [p for p in self.pieces.values() if p.couleur == couleur]
+
+    def a_bouge(self, piece):
+        return piece in self.deja_bouge
+
+    def deplacer(self, piece, dest):
+        cible = self.get_piece(dest)
+        if cible is not None:
+            del self.pieces[dest]
+            cible.position = None
+            self.capturees.append(cible)
+        del self.pieces[piece.position]
+        piece.position = dest
+        self.pieces[dest] = piece
+        self.deja_bouge.add(piece)
+
+    def roquer(self, roi, tour, dest_roi, dest_tour):
+        del self.pieces[roi.position]
+        del self.pieces[tour.position]
+        roi.position  = dest_roi;  self.pieces[dest_roi]  = roi;  self.deja_bouge.add(roi)
+        tour.position = dest_tour; self.pieces[dest_tour] = tour; self.deja_bouge.add(tour)
+
+    def promouvoir(self, pos, classe):
+        pion = self.get_piece(pos)
+        if pion is None: return
+        self.pieces[pos] = classe(pos, pion.couleur)
+
+    def tourner_90(self):
+        nouvelles = {}
+        for pos, piece in self.pieces.items():
+            c, r = pos.col_idx(), pos.ran_idx()
+            npos = Position(COLONNES[r], 8 - c)
+            piece.position = npos
+            if isinstance(piece, Pion):
+                piece.direction = 1
+            nouvelles[npos] = piece
+        self.pieces = nouvelles
+
+    def afficher(self):
+        print()
+        print("    a   b   c   d   e   f   g   h")
+        print("  +---+---+---+---+---+---+---+---+")
+        for ran in range(8, 0, -1):
+            ligne = str(ran) + " |"
+            for col in COLONNES:
+                p = self.get_piece(Position(col, ran))
+                if p is None:
+                    case = (COLONNES.index(col) + ran) % 2 == 0
+                    ligne += " . |" if case else "   |"
+                else:
+                    ligne += " " + str(p) + " |"
+            print(ligne + " " + str(ran))
+            if ran > 1:
+                print("  +---+---+---+---+---+---+---+---+")
+        print("  +---+---+---+---+---+---+---+---+")
+        print("    a   b   c   d   e   f   g   h")
+        # Afficher les captures
+        cap_b = [str(p) for p in self.capturees if p.couleur == NOIR]
+        cap_n = [str(p) for p in self.capturees if p.couleur == BLANC]
+        if cap_b: print("  Blancs ont capture :", " ".join(cap_b))
+        if cap_n: print("  Noirs ont capture  :", " ".join(cap_n))
+        print()
+
+    def en_dict(self):
+        bougees = [str(p.position) for p in self.deja_bouge if p.position is not None]
+        return {
+            'pieces':    [{'col': pos.colonne, 'ran': pos.rangee, 'type': p.lettre(),
+                           'couleur': p.couleur,
+                           'dir': p.direction if isinstance(p, Pion) else None}
+                          for pos, p in self.pieces.items()],
+            'capturees': [{'type': p.lettre(), 'couleur': p.couleur} for p in self.capturees],
+            'bougees':   bougees
+        }
+
+    def depuis_dict(donnees):
+        pl = Plateau.__new__(Plateau)
+        pl.pieces = {}; pl.capturees = []; pl.deja_bouge = set()
+        for e in donnees['pieces']:
+            pos = Position(e['col'], e['ran'])
+            p   = CLASSES_PIECES[e['type']](pos, e['couleur'])
+            if isinstance(p, Pion) and e['dir'] is not None:
+                p.direction = e['dir']
+            pl.pieces[pos] = p
+        for e in donnees.get('capturees', []):
+            p = CLASSES_PIECES[e['type']](Position('a', 1), e['couleur'])
+            p.position = None; pl.capturees.append(p)
+        bougees = set(donnees.get('bougees', []))
+        for pos, p in pl.pieces.items():
+            if str(pos) in bougees: pl.deja_bouge.add(p)
+        return pl
+
+# JOUEUR
+
+class Joueur:
+
+    def __init__(self, nom, couleur):
+        self.nom     = nom
+        self.couleur = couleur
+
+    def est_blanc(self): return self.couleur == BLANC
+
+    def __str__(self):
+        return self.nom + (' (Blancs)' if self.couleur == BLANC else ' (Noirs)')
+
+    def demander_coup(self, plateau=None, jeu=None):
+        c = 'Blancs' if self.couleur == BLANC else 'Noirs'
+        print("[" + self.nom + " - " + c + "] Votre coup (ex: Pe2 Pe4) :")
+        return input("  > ").strip()
+
+
+class JoueurIA(Joueur):
+
+    def demander_coup(self, plateau, jeu):
+        pieces = plateau.toutes_pieces(self.couleur)
+        random.shuffle(pieces)
+        candidats = []
+        for piece in pieces:
+            if piece.position is None: continue
+            for col in COLONNES:
+                for ran in range(1, 9):
+                    dest = Position(col, ran)
+                    if dest == piece.position: continue
+                    try:
+                        if piece.coup_valide(dest, plateau):
+                            candidats.append((piece, piece.position, dest))
+                    except Exception:
+                        continue
+        random.shuffle(candidats)
+        for piece, pos, dest in candidats:
+            try:
+                if not jeu.coup_expose_roi(piece, dest, self.couleur):
+                    coup = piece.lettre() + str(pos) + ' ' + piece.lettre() + str(dest)
+                    print("  [IA] joue :", coup)
+                    return coup
+            except Exception:
+                continue
+        return ""
+
+# JEU
+
+class Jeu:
+
+    def __init__(self):
+        self.plateau        = Plateau()
+        self.joueurs        = []
+        self.joueur_courant = None
+        self.mode_rotation  = False
+        self.compteur_tours = 0
+
+    def analyser_coup(self, chaine):
+        m = re.match(r'^([KQBNRP])([a-h][1-8])\s+([KQBNRP])([a-h][1-8])$',
+                     chaine.strip(), re.IGNORECASE)
+        if not m: raise ValueError("Format invalide : " + chaine)
+        return (m.group(1).upper(), Position.depuis_chaine(m.group(2)),
+                m.group(3).upper(), Position.depuis_chaine(m.group(4)))
+
+    def coup_valide(self, chaine):
+        try:
+            l1, dep, l2, arr = self.analyser_coup(chaine)
+        except ValueError:
+            return False
+        if l1 != l2: return False
+        piece = self.plateau.get_piece(dep)
+        if piece is None or piece.lettre() != l1: return False
+        if piece.couleur != self.joueur_courant.couleur: return False
+        if not piece.coup_valide(arr, self.plateau): return False
+        if isinstance(piece, Roi) and abs(arr.col_idx() - dep.col_idx()) == 2:
+            return self.roque_valide(piece, arr.col_idx() > dep.col_idx())
+        return not self.coup_expose_roi(piece, arr, self.joueur_courant.couleur)
+
+    def roque_valide(self, roi, petit_roque):
+        couleur  = roi.couleur
+        adverse  = NOIR if couleur == BLANC else BLANC
+        rangee   = 1 if couleur == BLANC else 8
+        col_tour = 'h' if petit_roque else 'a'
+        tour     = self.plateau.get_piece(Position(col_tour, rangee))
+        if tour is None or not isinstance(tour, Tour): return False
+        if tour.couleur != couleur: return False
+        if self.plateau.a_bouge(roi) or self.plateau.a_bouge(tour): return False
+        col_roi = roi.position.col_idx()
+        pas     = 1 if tour.position.col_idx() > col_roi else -1
+        for ci in range(col_roi + pas, tour.position.col_idx(), pas):
+            if self.plateau.get_piece(Position(COLONNES[ci], rangee)) is not None:
+                return False
+        if self.roi_en_echec(couleur): return False
+        for ci in [col_roi + pas, col_roi + 2 * pas]:
+            if self.case_menacee(Position(COLONNES[ci], rangee), adverse):
+                return False
+        return True
+
+    def appliquer_coup(self, chaine):
+        _, dep, _, arr = self.analyser_coup(chaine)
+        piece = self.plateau.get_piece(dep)
+        if isinstance(piece, Roi) and abs(arr.col_idx() - dep.col_idx()) == 2:
+            petit = arr.col_idx() > dep.col_idx()
+            rangee = dep.rangee
+            tour = self.plateau.get_piece(Position('h' if petit else 'a', rangee))
+            self.plateau.roquer(piece, tour, arr,
+                                Position('f' if petit else 'd', rangee))
+            return
+        self.plateau.deplacer(piece, arr)
+
+    def changer_joueur(self):
+        self.joueur_courant = (self.joueurs[1]
+                               if self.joueur_courant is self.joueurs[0]
+                               else self.joueurs[0])
+
+    def trouver_roi(self, couleur):
+        for p in self.plateau.toutes_pieces(couleur):
+            if isinstance(p, Roi): return p
+        return None
+
+    def case_menacee(self, pos, par_couleur):
+        for p in self.plateau.toutes_pieces(par_couleur):
+            try:
+                if isinstance(p, Pion):
+                    if p.attaque_case(pos): return True
+                elif p.coup_valide(pos, self.plateau):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def roi_en_echec(self, couleur):
+        roi = self.trouver_roi(couleur)
+        if roi is None: return False
+        return self.case_menacee(roi.position, NOIR if couleur == BLANC else BLANC)
+
+    def coup_expose_roi(self, piece, dest, couleur):
+        # Simulation sans effet de bord sur deja_bouge
+        old  = piece.position
+        cible = self.plateau.get_piece(dest)
+        del self.plateau.pieces[old]
+        if cible is not None: self.plateau.pieces.pop(dest, None)
+        piece.position = dest
+        self.plateau.pieces[dest] = piece
+        roi    = self.trouver_roi(couleur)
+        expose = roi is not None and self.case_menacee(
+            roi.position, NOIR if couleur == BLANC else BLANC)
+        del self.plateau.pieces[dest]
+        piece.position = old
+        self.plateau.pieces[old] = piece
+        if cible is not None:
+            cible.position = dest
+            self.plateau.pieces[dest] = cible
+        return expose
+
+    def a_un_coup_legal(self, couleur):
+        for piece in self.plateau.toutes_pieces(couleur):
+            for col in COLONNES:
+                for ran in range(1, 9):
+                    dest = Position(col, ran)
+                    if dest == piece.position: continue
+                    try:
+                        if not piece.coup_valide(dest, self.plateau): continue
+                        if isinstance(piece, Roi) and abs(dest.col_idx() - piece.position.col_idx()) == 2:
+                            continue
+                        if not self.coup_expose_roi(piece, dest, couleur):
+                            return True
+                    except Exception:
+                        continue
+        return False
+
+    def echec_et_mat(self):
+        couleur = self.joueur_courant.couleur
+        adverse = NOIR if couleur == BLANC else BLANC
+        roi = self.trouver_roi(couleur)
+        if roi is None: return True
+        return self.case_menacee(roi.position, adverse) and not self.a_un_coup_legal(couleur)
+
+    def pat(self):
+        couleur = self.joueur_courant.couleur
+        adverse = NOIR if couleur == BLANC else BLANC
+        roi = self.trouver_roi(couleur)
+        if roi is None: return False
+        return not self.case_menacee(roi.position, adverse) and not self.a_un_coup_legal(couleur)
+
+    def demander_promotion(self):
+        choix_valides = {'Q': Reine, 'R': Tour, 'B': Fou, 'N': Cavalier}
+        print("  Promotion ! Choisissez : Q=Reine  R=Tour  B=Fou  N=Cavalier")
+        while True:
+            c = input("  > ").strip().upper()
+            if c in choix_valides:
+                return choix_valides[c]
+            print("  Choix invalide, entrez Q, R, B ou N")
+
+    def sauvegarder(self, chemin="sauvegarde.json"):
+        donnees = {
+            'plateau': self.plateau.en_dict(),
+            'joueurs': [{'nom': j.nom, 'couleur': j.couleur,
+                         'ia': isinstance(j, JoueurIA)} for j in self.joueurs],
+            'courant':       self.joueurs.index(self.joueur_courant),
+            'mode_rotation': self.mode_rotation,
+            'compteur':      self.compteur_tours
+        }
+        with open(chemin, 'w', encoding='utf-8') as f:
+            json.dump(donnees, f, ensure_ascii=False, indent=2)
+        print("  Partie sauvegardee.")
+
+    def charger(self, chemin="sauvegarde.json"):
+        if not os.path.exists(chemin):
+            print("  Aucune sauvegarde trouvee."); return False
+        with open(chemin, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        self.plateau = Plateau.depuis_dict(d['plateau'])
+        self.joueurs = []
+        for jd in d['joueurs']:
+            cls = JoueurIA if jd['ia'] else Joueur
+            self.joueurs.append(cls(jd['nom'], jd['couleur']))
+        self.joueur_courant = self.joueurs[d['courant']]
+        self.mode_rotation  = d.get('mode_rotation', False)
+        self.compteur_tours = d.get('compteur', 0)
+        print("  Partie chargee."); return True
+
+    def jouer(self):
+        # Initialisation des joueurs
+        print("=" * 45)
+        print("     JEU D'ECHECS - Version terminale")
+        print("=" * 45)
+        for i, couleur in enumerate([BLANC, NOIR]):
+            nom = input("Nom du joueur " + str(i+1) +
+                        (" (Blancs)" if couleur == BLANC else " (Noirs)") +
+                        " [AI pour ordinateur] : ").strip()
+            if not nom: nom = "Joueur" + str(i+1)
+            if nom.upper() == "AI":
+                self.joueurs.append(JoueurIA("IA_" + ("Blancs" if couleur == BLANC else "Noirs"),
+                                             couleur))
+            else:
+                self.joueurs.append(Joueur(nom, couleur))
+
+        rep = input("Mode plateau tournant ? (o/n) : ").strip().lower()
+        self.mode_rotation = (rep == 'o')
+
+        self.joueur_courant = self.joueurs[0]
+
+        # Boucle principale
+        while True:
+            self.plateau.afficher()
+            couleur = self.joueur_courant.couleur
+            adverse = NOIR if couleur == BLANC else BLANC
+
+            # Verifier echec et mat / pat
+            if self.echec_et_mat():
+                gagnant = self.joueurs[1] if self.joueur_courant is self.joueurs[0] else self.joueurs[0]
+                print("ECHEC ET MAT ! " + gagnant.nom + " remporte la partie !")
+                break
+            if self.pat():
+                print("PAT ! Egalite !")
+                break
+
+            # Signaler si le roi est en echec
+            if self.roi_en_echec(couleur):
+                print("  !! " + self.joueur_courant.nom + " est EN ECHEC !!")
+
+            # Demander et valider le coup
+            coup_joue = False
+            while not coup_joue:
+                if isinstance(self.joueur_courant, JoueurIA):
+                    coup = self.joueur_courant.demander_coup(self.plateau, self)
+                else:
+                    coup = self.joueur_courant.demander_coup()
+
+                if coup.lower() == 'quit':
+                    print("Partie abandonnee."); return
+                if coup.lower() == 'save':
+                    self.sauvegarder(); continue
+                if coup.lower() == 'load':
+                    self.charger(); continue
+
+                if not self.coup_valide(coup):
+                    print("  Coup invalide, reessayez.")
+                    continue
+
+                self.appliquer_coup(coup)
+
+                # Promotion
+                _, dep, _, arr = self.analyser_coup(coup)
+                piece_arr = self.plateau.get_piece(arr)
+                if isinstance(piece_arr, Pion) and piece_arr.est_en_promotion():
+                    if isinstance(self.joueur_courant, JoueurIA):
+                        self.plateau.promouvoir(arr, Reine)
+                        print("  IA : promotion en Reine")
+                    else:
+                        classe = self.demander_promotion()
+                        self.plateau.promouvoir(arr, classe)
+
+                coup_joue = True
+
+            # Rotation tous les 2 tours
+            self.compteur_tours += 1
+            if self.mode_rotation and self.compteur_tours % 2 == 0:
+                print("\n  >>> LE PLATEAU TOURNE DE 90 DEGRES <<<")
+                self.plateau.tourner_90()
+                print("  Tous les pions avancent maintenant vers le haut (rangees croissantes).")
+
+            self.changer_joueur()
+
+
+# LANCEMENT
+
+    jeu = Jeu()
+
+    if os.path.exists("sauvegarde.json"):
+        rep = input("Une sauvegarde existe. Charger ? (o/n) : ").strip().lower()
+        if rep == 'o':
+            jeu.charger()
+        else:
+            jeu.jouer()
+            jeu = Jeu()  # nouvelle partie apres la fin
+
+    jeu.jouer()
