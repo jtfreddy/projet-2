@@ -1,607 +1,907 @@
-import json, os, random, re
+#  11. AIPLAYER
 
-# CONSTANTES
-COLONNES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
-BLANC    = 0
-NOIR     = 1
+class AIPlayer(Player):
+    def __init__(self, name: str, color: int):
+        super().__init__(name, color)
 
-# Symboles affiches dans le terminal (majuscule=blanc, minuscule=noir)
-SYMBOLES = {
-    'K': ('K', 'k'),   # Roi
-    'Q': ('Q', 'q'),   # Reine
-    'R': ('R', 'r'),   # Tour
-    'B': ('B', 'b'),   # Fou
-    'N': ('N', 'n'),   # Cavalier
-    'P': ('P', 'p'),   # Pion
-}
-
-# POSITION
-
-class Position:
-
-    def __init__(self, colonne, rangee):
-        self.colonne = colonne   # lettre 'a' a 'h'
-        self.rangee  = rangee    # entier 1 a 8
-
-    def col_idx(self):
-        return COLONNES.index(self.colonne)
-
-    def ran_idx(self):
-        return self.rangee - 1
-
-    def __str__(self):
-        return self.colonne + str(self.rangee)
-
-    def __eq__(self, autre):
-        return (isinstance(autre, Position) and
-                self.colonne == autre.colonne and
-                self.rangee  == autre.rangee)
-
-    def __hash__(self):
-        return hash((self.colonne, self.rangee))
-
-    def depuis_chaine(s):
-        return Position(s[0].lower(), int(s[1]))
-
-# PIECES
-
-class Piece:
-
-    def __init__(self, position, couleur):
-        self.position = position
-        self.couleur  = couleur
-
-    def lettre(self):
-        return '?'
-
-    def __str__(self):
-        sym = SYMBOLES.get(self.lettre(), ('?', '?'))
-        return sym[0] if self.couleur == BLANC else sym[1]
-
-    def est_blanc(self):
-        return self.couleur == BLANC
-
-    def case_alliee(self, pos, plateau):
-        p = plateau.get_piece(pos)
-        return p is not None and p.couleur == self.couleur
-
-    def chemin_libre(self, dest, plateau):
-        c1, r1 = self.position.col_idx(), self.position.ran_idx()
-        c2, r2 = dest.col_idx(), dest.ran_idx()
-        dc = 0 if c2 == c1 else (1 if c2 > c1 else -1)
-        dr = 0 if r2 == r1 else (1 if r2 > r1 else -1)
-        c, r = c1 + dc, r1 + dr
-        while (c, r) != (c2, r2):
-            if plateau.get_piece(Position(COLONNES[c], r + 1)) is not None:
-                return False
-            c += dc
-            r += dr
-        return True
-
-    def coup_valide(self, dest, plateau):
-        return False
-
-
-class Roi(Piece):
-    def lettre(self): return 'K'
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        dc = abs(dest.col_idx() - self.position.col_idx())
-        dr = abs(dest.ran_idx() - self.position.ran_idx())
-        if dc <= 1 and dr <= 1 and dc + dr > 0: return True
-        if dr == 0 and dc == 2: return True   # roque, valide par Jeu
-        return False
-
-
-class Reine(Piece):
-    def lettre(self): return 'Q'
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        dc = abs(dest.col_idx() - self.position.col_idx())
-        dr = abs(dest.ran_idx() - self.position.ran_idx())
-        ok = (dc == 0 or dr == 0) and dc + dr > 0
-        ok = ok or (dc == dr and dc > 0)
-        return ok and self.chemin_libre(dest, plateau)
-
-
-class Fou(Piece):
-    def lettre(self): return 'B'
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        dc = abs(dest.col_idx() - self.position.col_idx())
-        dr = abs(dest.ran_idx() - self.position.ran_idx())
-        return dc == dr and dc > 0 and self.chemin_libre(dest, plateau)
-
-
-class Cavalier(Piece):
-    def lettre(self): return 'N'
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        dc = abs(dest.col_idx() - self.position.col_idx())
-        dr = abs(dest.ran_idx() - self.position.ran_idx())
-        return (dc == 2 and dr == 1) or (dc == 1 and dr == 2)
-
-
-class Tour(Piece):
-    def lettre(self): return 'R'
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        dc = abs(dest.col_idx() - self.position.col_idx())
-        dr = abs(dest.ran_idx() - self.position.ran_idx())
-        ok = (dc == 0 and dr > 0) or (dr == 0 and dc > 0)
-        return ok and self.chemin_libre(dest, plateau)
-
-
-class Pion(Piece):
-
-    def __init__(self, position, couleur):
-        super().__init__(position, couleur)
-        self.direction = 1 if couleur == BLANC else -1
-
-    def lettre(self): return 'P'
-
-    def rangee_depart(self):
-        if self.direction == 1: return self.position.ran_idx() == 1
-        return self.position.ran_idx() == 6
-
-    def coup_valide(self, dest, plateau):
-        if self.case_alliee(dest, plateau): return False
-        cn, rn = self.position.col_idx(), self.position.ran_idx()
-        cd, rd = dest.col_idx(), dest.ran_idx()
-        dc, dr = cd - cn, rd - rn
-        if dc == 0 and dr == self.direction:
-            return plateau.get_piece(dest) is None
-        if dc == 0 and dr == 2 * self.direction and self.rangee_depart():
-            mid = Position(COLONNES[cn], rn + self.direction + 1)
-            return plateau.get_piece(mid) is None and plateau.get_piece(dest) is None
-        if abs(dc) == 1 and dr == self.direction:
-            cible = plateau.get_piece(dest)
-            return cible is not None and cible.couleur != self.couleur
-        return False
-
-    def attaque_case(self, dest):
-        cn, rn = self.position.col_idx(), self.position.ran_idx()
-        return abs(dest.col_idx() - cn) == 1 and (dest.ran_idx() - rn) == self.direction
-
-    def est_en_promotion(self):
-        if self.direction == 1: return self.position.ran_idx() == 7
-        return self.position.ran_idx() == 0
-
-# PLATEAU
-
-CLASSES_PIECES = {'K': Roi, 'Q': Reine, 'R': Tour, 'B': Fou, 'N': Cavalier, 'P': Pion}
-
-class Plateau:
-
-    def __init__(self):
-        self.pieces     = {}    # dictionnaire Position -> Piece
-        self.capturees  = []    # liste des pieces capturees
-        self.deja_bouge = set() # pieces ayant deja bouge (pour le roque)
-        self.placer_pieces_initiales()
-
-    def placer_pieces_initiales(self):
-        ordre = [Tour, Cavalier, Fou, Reine, Roi, Fou, Cavalier, Tour]
-        for i, classe in enumerate(ordre):
-            col = COLONNES[i]
-            self.pieces[Position(col, 1)] = classe(Position(col, 1), BLANC)
-            self.pieces[Position(col, 8)] = classe(Position(col, 8), NOIR)
-        for col in COLONNES:
-            self.pieces[Position(col, 2)] = Pion(Position(col, 2), BLANC)
-            self.pieces[Position(col, 7)] = Pion(Position(col, 7), NOIR)
-
-    def get_piece(self, pos):
-        return self.pieces.get(pos, None)
-
-    def toutes_pieces(self, couleur=None):
-        if couleur is None: return list(self.pieces.values())
-        return [p for p in self.pieces.values() if p.couleur == couleur]
-
-    def a_bouge(self, piece):
-        return piece in self.deja_bouge
-
-    def deplacer(self, piece, dest):
-        cible = self.get_piece(dest)
-        if cible is not None:
-            del self.pieces[dest]
-            cible.position = None
-            self.capturees.append(cible)
-        del self.pieces[piece.position]
-        piece.position = dest
-        self.pieces[dest] = piece
-        self.deja_bouge.add(piece)
-
-    def roquer(self, roi, tour, dest_roi, dest_tour):
-        del self.pieces[roi.position]
-        del self.pieces[tour.position]
-        roi.position  = dest_roi;  self.pieces[dest_roi]  = roi;  self.deja_bouge.add(roi)
-        tour.position = dest_tour; self.pieces[dest_tour] = tour; self.deja_bouge.add(tour)
-
-    def promouvoir(self, pos, classe):
-        pion = self.get_piece(pos)
-        if pion is None: return
-        self.pieces[pos] = classe(pos, pion.couleur)
-
-    def tourner_90(self):
-        nouvelles = {}
-        for pos, piece in self.pieces.items():
-            c, r = pos.col_idx(), pos.ran_idx()
-            npos = Position(COLONNES[r], 8 - c)
-            piece.position = npos
-            if isinstance(piece, Pion):
-                piece.direction = 1
-            nouvelles[npos] = piece
-        self.pieces = nouvelles
-
-    def afficher(self):
-        print()
-        print("    a   b   c   d   e   f   g   h")
-        print("  +---+---+---+---+---+---+---+---+")
-        for ran in range(8, 0, -1):
-            ligne = str(ran) + " |"
-            for col in COLONNES:
-                p = self.get_piece(Position(col, ran))
-                if p is None:
-                    case = (COLONNES.index(col) + ran) % 2 == 0
-                    ligne += " . |" if case else "   |"
-                else:
-                    ligne += " " + str(p) + " |"
-            print(ligne + " " + str(ran))
-            if ran > 1:
-                print("  +---+---+---+---+---+---+---+---+")
-        print("  +---+---+---+---+---+---+---+---+")
-        print("    a   b   c   d   e   f   g   h")
-        # Afficher les captures
-        cap_b = [str(p) for p in self.capturees if p.couleur == NOIR]
-        cap_n = [str(p) for p in self.capturees if p.couleur == BLANC]
-        if cap_b: print("  Blancs ont capture :", " ".join(cap_b))
-        if cap_n: print("  Noirs ont capture  :", " ".join(cap_n))
-        print()
-
-    def en_dict(self):
-        bougees = [str(p.position) for p in self.deja_bouge if p.position is not None]
-        return {
-            'pieces':    [{'col': pos.colonne, 'ran': pos.rangee, 'type': p.lettre(),
-                           'couleur': p.couleur,
-                           'dir': p.direction if isinstance(p, Pion) else None}
-                          for pos, p in self.pieces.items()],
-            'capturees': [{'type': p.lettre(), 'couleur': p.couleur} for p in self.capturees],
-            'bougees':   bougees
-        }
-
-    def depuis_dict(donnees):
-        pl = Plateau.__new__(Plateau)
-        pl.pieces = {}; pl.capturees = []; pl.deja_bouge = set()
-        for e in donnees['pieces']:
-            pos = Position(e['col'], e['ran'])
-            p   = CLASSES_PIECES[e['type']](pos, e['couleur'])
-            if isinstance(p, Pion) and e['dir'] is not None:
-                p.direction = e['dir']
-            pl.pieces[pos] = p
-        for e in donnees.get('capturees', []):
-            p = CLASSES_PIECES[e['type']](Position('a', 1), e['couleur'])
-            p.position = None; pl.capturees.append(p)
-        bougees = set(donnees.get('bougees', []))
-        for pos, p in pl.pieces.items():
-            if str(pos) in bougees: pl.deja_bouge.add(p)
-        return pl
-
-# JOUEUR
-
-class Joueur:
-
-    def __init__(self, nom, couleur):
-        self.nom     = nom
-        self.couleur = couleur
-
-    def est_blanc(self): return self.couleur == BLANC
-
-    def __str__(self):
-        return self.nom + (' (Blancs)' if self.couleur == BLANC else ' (Noirs)')
-
-    def demander_coup(self, plateau=None, jeu=None):
-        c = 'Blancs' if self.couleur == BLANC else 'Noirs'
-        print("[" + self.nom + " - " + c + "] Votre coup (ex: Pe2 Pe4) :")
-        return input("  > ").strip()
-
-
-class JoueurIA(Joueur):
-
-    def demander_coup(self, plateau, jeu):
-        pieces = plateau.toutes_pieces(self.couleur)
+    def askMove(self, board: Board = None, chess=None) -> str:
+        """Coup aléatoire rapide : collecte les candidats puis filtre l'échec."""
+        if board is None: return ""
+        color = self.get_color()
+        pieces = board.get_all_pieces(color)
         random.shuffle(pieces)
-        candidats = []
+        candidates = []
         for piece in pieces:
-            if piece.position is None: continue
-            for col in COLONNES:
-                for ran in range(1, 9):
-                    dest = Position(col, ran)
-                    if dest == piece.position: continue
-                    try:
-                        if piece.coup_valide(dest, plateau):
-                            candidats.append((piece, piece.position, dest))
-                    except Exception:
-                        continue
-        random.shuffle(candidats)
-        for piece, pos, dest in candidats:
+            pos = piece.get_position()
+            if pos is None: continue
+            for dest in [Position(col, row) for col in VALID_COLUMNS for row in range(1, 9)]:
+                if dest == pos: continue
+                try:
+                    if piece.isValidMove(dest, board):
+                        candidates.append((piece, pos, dest))  # coup potentiellement jouable
+                except Exception:
+                    continue
+        random.shuffle(candidates)  # on melange pour que l'IA ne joue pas toujours pareil
+        for piece, pos, dest in candidates:
             try:
-                if not jeu.coup_expose_roi(piece, dest, self.couleur):
-                    coup = piece.lettre() + str(pos) + ' ' + piece.lettre() + str(dest)
-                    print("  [IA] joue :", coup)
-                    return coup
+                if chess and chess._move_leaves_king_in_check(piece, dest, color):
+                    continue  # ce coup exposerait le roi, on le saute
+                return f"{str(piece).upper()}{pos} {str(piece).upper()}{dest}"
             except Exception:
                 continue
         return ""
 
-# JEU
+_PIECE_LETTER_MAP = {'K': King, 'Q': Queen, 'B': Bishop, 'N': Knight, 'R': Rook, 'P': Pawn}
 
-class Jeu:
+#  12. CHESS
 
+class Chess:
     def __init__(self):
-        self.plateau        = Plateau()
-        self.joueurs        = []
-        self.joueur_courant = None
-        self.mode_rotation  = False
-        self.compteur_tours = 0
+        self.board:         Board  = Board()
+        self.players:       list   = []
+        self.currentPlayer: Player = None
 
-    def analyser_coup(self, chaine):
+    def _parse_move(self, move: str):
+        # Analyse la chaine 'Pe2 Pe4' et retourne (lettre, pos_depart, lettre, pos_arrivee)
         m = re.match(r'^([KQBNRP])([a-h][1-8])\s+([KQBNRP])([a-h][1-8])$',
-                     chaine.strip(), re.IGNORECASE)
-        if not m: raise ValueError("Format invalide : " + chaine)
-        return (m.group(1).upper(), Position.depuis_chaine(m.group(2)),
-                m.group(3).upper(), Position.depuis_chaine(m.group(4)))
+                     move.strip(), re.IGNORECASE)
+        if not m: raise ValueError(f"Format invalide : '{move}'")
+        return (m.group(1).upper(), Position.from_string(m.group(2).lower()),
+                m.group(3).upper(), Position.from_string(m.group(4).lower()))
 
-    def coup_valide(self, chaine):
-        try:
-            l1, dep, l2, arr = self.analyser_coup(chaine)
-        except ValueError:
-            return False
-        if l1 != l2: return False
-        piece = self.plateau.get_piece(dep)
-        if piece is None or piece.lettre() != l1: return False
-        if piece.couleur != self.joueur_courant.couleur: return False
-        if not piece.coup_valide(arr, self.plateau): return False
-        if isinstance(piece, Roi) and abs(arr.col_idx() - dep.col_idx()) == 2:
-            return self.roque_valide(piece, arr.col_idx() > dep.col_idx())
-        return not self.coup_expose_roi(piece, arr, self.joueur_courant.couleur)
+    def is_castling_valid(self, king: "King", kingside: bool) -> bool:
+        # Verifie toutes les conditions du roque : pieces pas bougees, cases libres,
+        # roi pas en echec et ne traversant pas de case menacee
+        color = king.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        row   = 1 if color == WHITE else 8
 
-    def roque_valide(self, roi, petit_roque):
-        couleur  = roi.couleur
-        adverse  = NOIR if couleur == BLANC else BLANC
-        rangee   = 1 if couleur == BLANC else 8
-        col_tour = 'h' if petit_roque else 'a'
-        tour     = self.plateau.get_piece(Position(col_tour, rangee))
-        if tour is None or not isinstance(tour, Tour): return False
-        if tour.couleur != couleur: return False
-        if self.plateau.a_bouge(roi) or self.plateau.a_bouge(tour): return False
-        col_roi = roi.position.col_idx()
-        pas     = 1 if tour.position.col_idx() > col_roi else -1
-        for ci in range(col_roi + pas, tour.position.col_idx(), pas):
-            if self.plateau.get_piece(Position(COLONNES[ci], rangee)) is not None:
+        rook_col  = 'h' if kingside else 'a'
+        rook_pos  = Position(rook_col, row)
+        rook      = self.board.getPiece(rook_pos)
+        if rook is None or not isinstance(rook, Rook): return False
+        if rook.get_color() != color:                  return False
+
+        if self.board.has_moved(king): return False
+        if self.board.has_moved(rook): return False
+
+        king_col  = king.get_position().col_index()   # toujours 4 (colonne e)
+        rook_col_i = rook_pos.col_index()
+        step = 1 if rook_col_i > king_col else -1
+        for ci in range(king_col + step, rook_col_i, step):
+            if self.board.getPiece(Position(VALID_COLUMNS[ci], row)) is not None:
                 return False
-        if self.roi_en_echec(couleur): return False
-        for ci in [col_roi + pas, col_roi + 2 * pas]:
-            if self.case_menacee(Position(COLONNES[ci], rangee), adverse):
+
+        if self._is_in_check(color): return False
+
+        dest_col = king_col + 2 * step   # case d'arrivée du roi
+        for ci in [king_col + step, dest_col]:
+            if self._is_threatened(Position(VALID_COLUMNS[ci], row), opp):
                 return False
+
         return True
 
-    def appliquer_coup(self, chaine):
-        _, dep, _, arr = self.analyser_coup(chaine)
-        piece = self.plateau.get_piece(dep)
-        if isinstance(piece, Roi) and abs(arr.col_idx() - dep.col_idx()) == 2:
-            petit = arr.col_idx() > dep.col_idx()
-            rangee = dep.rangee
-            tour = self.plateau.get_piece(Position('h' if petit else 'a', rangee))
-            self.plateau.roquer(piece, tour, arr,
-                                Position('f' if petit else 'd', rangee))
-            return
-        self.plateau.deplacer(piece, arr)
+    def isValidMove(self, move: str) -> bool:
+        try:
+            lf, fp, lt, tp = self._parse_move(move)
+        except ValueError:
+            return False
+        if lf != lt: return False
+        piece = self.board.getPiece(fp)
+        if piece is None: return False
+        if not isinstance(piece, _PIECE_LETTER_MAP[lf]): return False
+        if piece.get_color() != self.currentPlayer.get_color(): return False
+        if not piece.isValidMove(tp, self.board): return False
 
-    def changer_joueur(self):
-        self.joueur_courant = (self.joueurs[1]
-                               if self.joueur_courant is self.joueurs[0]
-                               else self.joueurs[0])
+        if isinstance(piece, King):
+            dc = tp.col_index() - fp.col_index()
+            if abs(dc) == 2:
+                kingside = dc > 0
+                return self.is_castling_valid(piece, kingside)
 
-    def trouver_roi(self, couleur):
-        for p in self.plateau.toutes_pieces(couleur):
-            if isinstance(p, Roi): return p
+        color = self.currentPlayer.get_color()
+        if self._move_leaves_king_in_check(piece, tp, color): return False
+        return True
+
+    def updateBoard(self, move: str):
+        _, fp, _, tp = self._parse_move(move)
+        piece = self.board.getPiece(fp)
+        if isinstance(piece, King):
+            dc = tp.col_index() - fp.col_index()
+            if abs(dc) == 2:
+                kingside  = dc > 0
+                row       = fp.get_row()
+                rook_from = Position('h' if kingside else 'a', row)
+                rook_to   = Position('f' if kingside else 'd', row)
+                rook      = self.board.getPiece(rook_from)
+                self.board.castle_move(piece, rook, tp, rook_to)
+                return
+        self.board.move_piece(piece, tp)
+
+    def promote_pawn(self, pos: Position, piece_class):
+        """Remplace le pion en 'pos' par la pièce choisie (appelé depuis l'UI)."""
+        pawn = self.board.getPiece(pos)
+        if pawn is None: return
+        new_piece = piece_class(pos, pawn.get_color())
+        self.board._Board__pieces[pos] = new_piece
+
+    def switchPlayer(self):
+        self.currentPlayer = (self.players[1] if self.currentPlayer is self.players[0]
+                              else self.players[0])
+
+    def _find_king(self, color: int):
+        for p in self.board.get_all_pieces(color):
+            if isinstance(p, King): return p
         return None
 
-    def case_menacee(self, pos, par_couleur):
-        for p in self.plateau.toutes_pieces(par_couleur):
+    def _is_threatened(self, position: Position, by_color: int) -> bool:
+        for p in self.board.get_all_pieces(by_color):
             try:
-                if isinstance(p, Pion):
-                    if p.attaque_case(pos): return True
-                elif p.coup_valide(pos, self.plateau):
-                    return True
-            except Exception:
-                continue
-        return False
-
-    def roi_en_echec(self, couleur):
-        roi = self.trouver_roi(couleur)
-        if roi is None: return False
-        return self.case_menacee(roi.position, NOIR if couleur == BLANC else BLANC)
-
-    def coup_expose_roi(self, piece, dest, couleur):
-        # Simulation sans effet de bord sur deja_bouge
-        old  = piece.position
-        cible = self.plateau.get_piece(dest)
-        del self.plateau.pieces[old]
-        if cible is not None: self.plateau.pieces.pop(dest, None)
-        piece.position = dest
-        self.plateau.pieces[dest] = piece
-        roi    = self.trouver_roi(couleur)
-        expose = roi is not None and self.case_menacee(
-            roi.position, NOIR if couleur == BLANC else BLANC)
-        del self.plateau.pieces[dest]
-        piece.position = old
-        self.plateau.pieces[old] = piece
-        if cible is not None:
-            cible.position = dest
-            self.plateau.pieces[dest] = cible
-        return expose
-
-    def a_un_coup_legal(self, couleur):
-        for piece in self.plateau.toutes_pieces(couleur):
-            for col in COLONNES:
-                for ran in range(1, 9):
-                    dest = Position(col, ran)
-                    if dest == piece.position: continue
-                    try:
-                        if not piece.coup_valide(dest, self.plateau): continue
-                        if isinstance(piece, Roi) and abs(dest.col_idx() - piece.position.col_idx()) == 2:
-                            continue
-                        if not self.coup_expose_roi(piece, dest, couleur):
-                            return True
-                    except Exception:
-                        continue
-        return False
-
-    def echec_et_mat(self):
-        couleur = self.joueur_courant.couleur
-        adverse = NOIR if couleur == BLANC else BLANC
-        roi = self.trouver_roi(couleur)
-        if roi is None: return True
-        return self.case_menacee(roi.position, adverse) and not self.a_un_coup_legal(couleur)
-
-    def pat(self):
-        couleur = self.joueur_courant.couleur
-        adverse = NOIR if couleur == BLANC else BLANC
-        roi = self.trouver_roi(couleur)
-        if roi is None: return False
-        return not self.case_menacee(roi.position, adverse) and not self.a_un_coup_legal(couleur)
-
-    def demander_promotion(self):
-        choix_valides = {'Q': Reine, 'R': Tour, 'B': Fou, 'N': Cavalier}
-        print("  Promotion ! Choisissez : Q=Reine  R=Tour  B=Fou  N=Cavalier")
-        while True:
-            c = input("  > ").strip().upper()
-            if c in choix_valides:
-                return choix_valides[c]
-            print("  Choix invalide, entrez Q, R, B ou N")
-
-    def sauvegarder(self, chemin="sauvegarde.json"):
-        donnees = {
-            'plateau': self.plateau.en_dict(),
-            'joueurs': [{'nom': j.nom, 'couleur': j.couleur,
-                         'ia': isinstance(j, JoueurIA)} for j in self.joueurs],
-            'courant':       self.joueurs.index(self.joueur_courant),
-            'mode_rotation': self.mode_rotation,
-            'compteur':      self.compteur_tours
-        }
-        with open(chemin, 'w', encoding='utf-8') as f:
-            json.dump(donnees, f, ensure_ascii=False, indent=2)
-        print("  Partie sauvegardee.")
-
-    def charger(self, chemin="sauvegarde.json"):
-        if not os.path.exists(chemin):
-            print("  Aucune sauvegarde trouvee."); return False
-        with open(chemin, 'r', encoding='utf-8') as f:
-            d = json.load(f)
-        self.plateau = Plateau.depuis_dict(d['plateau'])
-        self.joueurs = []
-        for jd in d['joueurs']:
-            cls = JoueurIA if jd['ia'] else Joueur
-            self.joueurs.append(cls(jd['nom'], jd['couleur']))
-        self.joueur_courant = self.joueurs[d['courant']]
-        self.mode_rotation  = d.get('mode_rotation', False)
-        self.compteur_tours = d.get('compteur', 0)
-        print("  Partie chargee."); return True
-
-    def jouer(self):
-        # Initialisation des joueurs
-        print("=" * 45)
-        print("     JEU D'ECHECS - Version terminale")
-        print("=" * 45)
-        for i, couleur in enumerate([BLANC, NOIR]):
-            nom = input("Nom du joueur " + str(i+1) +
-                        (" (Blancs)" if couleur == BLANC else " (Noirs)") +
-                        " [AI pour ordinateur] : ").strip()
-            if not nom: nom = "Joueur" + str(i+1)
-            if nom.upper() == "AI":
-                self.joueurs.append(JoueurIA("IA_" + ("Blancs" if couleur == BLANC else "Noirs"),
-                                             couleur))
-            else:
-                self.joueurs.append(Joueur(nom, couleur))
-
-        rep = input("Mode plateau tournant ? (o/n) : ").strip().lower()
-        self.mode_rotation = (rep == 'o')
-
-        self.joueur_courant = self.joueurs[0]
-
-        # Boucle principale
-        while True:
-            self.plateau.afficher()
-            couleur = self.joueur_courant.couleur
-            adverse = NOIR if couleur == BLANC else BLANC
-
-            # Verifier echec et mat / pat
-            if self.echec_et_mat():
-                gagnant = self.joueurs[1] if self.joueur_courant is self.joueurs[0] else self.joueurs[0]
-                print("ECHEC ET MAT ! " + gagnant.nom + " remporte la partie !")
-                break
-            if self.pat():
-                print("PAT ! Egalite !")
-                break
-
-            # Signaler si le roi est en echec
-            if self.roi_en_echec(couleur):
-                print("  !! " + self.joueur_courant.nom + " est EN ECHEC !!")
-
-            # Demander et valider le coup
-            coup_joue = False
-            while not coup_joue:
-                if isinstance(self.joueur_courant, JoueurIA):
-                    coup = self.joueur_courant.demander_coup(self.plateau, self)
+                if isinstance(p, Pawn):
+                    if p.threatens(position): return True
                 else:
-                    coup = self.joueur_courant.demander_coup()
+                    if p.isValidMove(position, self.board): return True
+            except Exception: continue
+        return False
 
-                if coup.lower() == 'quit':
-                    print("Partie abandonnee."); return
-                if coup.lower() == 'save':
-                    self.sauvegarder(); continue
-                if coup.lower() == 'load':
-                    self.charger(); continue
+    def _is_in_check(self, color: int) -> bool:
+        king = self._find_king(color)
+        if king is None: return False
+        return self._is_threatened(king.get_position(), BLACK if color == WHITE else WHITE)
 
-                if not self.coup_valide(coup):
-                    print("  Coup invalide, reessayez.")
-                    continue
+    def _move_leaves_king_in_check(self, piece, dest, color):
+        # On simule le coup directement dans le dictionnaire sans passer par move_piece
+        # (pour ne pas modifier __moved ni declencher d'effets de bord)
+        # A la fin on annule tout pour revenir a l'etat d'avant
+        old      = piece.get_position()
+        captured = self.board.getPiece(dest)
 
-                self.appliquer_coup(coup)
+        del self.board._Board__pieces[old]
+        if captured is not None:
+            self.board._Board__pieces.pop(dest, None)
+        piece._position = dest
+        self.board._Board__pieces[dest] = piece
 
-                # Promotion
-                _, dep, _, arr = self.analyser_coup(coup)
-                piece_arr = self.plateau.get_piece(arr)
-                if isinstance(piece_arr, Pion) and piece_arr.est_en_promotion():
-                    if isinstance(self.joueur_courant, JoueurIA):
-                        self.plateau.promouvoir(arr, Reine)
-                        print("  IA : promotion en Reine")
-                    else:
-                        classe = self.demander_promotion()
-                        self.plateau.promouvoir(arr, classe)
+        ep_pion = None
+        ep_pos  = None
+        if (isinstance(piece, Pawn) and dest == self.board.en_passant_target
+                and captured is None):
+            ep_pos  = Position(dest.get_column(), old.get_row())
+            ep_pion = self.board._Board__pieces.pop(ep_pos, None)
+            if ep_pion: ep_pion._position = None
 
-                coup_joue = True
+        king  = self._find_king(color)
+        still = king is not None and self._is_threatened(
+            king.get_position(), BLACK if color == WHITE else WHITE)
 
-            # Rotation tous les 2 tours
-            self.compteur_tours += 1
-            if self.mode_rotation and self.compteur_tours % 2 == 0:
-                print("\n  >>> LE PLATEAU TOURNE DE 90 DEGRES <<<")
-                self.plateau.tourner_90()
-                print("  Tous les pions avancent maintenant vers le haut (rangees croissantes).")
+        del self.board._Board__pieces[dest]
+        piece._position = old
+        self.board._Board__pieces[old] = piece
+        if captured is not None:
+            captured._position = dest
+            self.board._Board__pieces[dest] = captured
+        if ep_pion is not None:
+            ep_pion._position = ep_pos
+            self.board._Board__pieces[ep_pos] = ep_pion
 
-            self.changer_joueur()
+        return still
+
+    def _has_legal_move(self, color: int) -> bool:
+        """Retourne True si le joueur de cette couleur a au moins un coup légal."""
+        for piece in self.board.get_all_pieces(color):
+            for col in VALID_COLUMNS:
+                for row in range(1, 9):
+                    dest = Position(col, row)
+                    if dest == piece.get_position(): continue
+                    try:
+                        if not piece.isValidMove(dest, self.board): continue
+                        if isinstance(piece, King) and abs(dest.col_index() - piece.get_position().col_index()) == 2:
+                            continue  # le roque ne compte pas ici
+                        if not self._move_leaves_king_in_check(piece, dest, color):
+                            return True
+                    except Exception: continue
+        return False
+
+    def isCheckMate(self) -> bool:
+        """Vrai si le joueur courant est en échec ET n'a aucun coup légal."""
+        color = self.currentPlayer.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        king  = self._find_king(color)
+        if king is None: return True
+        if not self._is_threatened(king.get_position(), opp): return False
+        return not self._has_legal_move(color)
+
+    def isStalemate(self) -> bool:
+        color = self.currentPlayer.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        king  = self._find_king(color)
+        if king is None: return False
+        if self._is_threatened(king.get_position(), opp): return False
+        return not self._has_legal_move(color)
+
+    def isInsufficientMaterial(self) -> bool:
+        # Certaines configurations ne peuvent jamais aboutir a un mat
+        # meme avec le meilleur jeu des deux cotes — on declare alors la partie nulle
+        # Cas geres : Roi seul vs Roi seul, Roi+Fou vs Roi, Roi+Cavalier vs Roi,
+        # et Roi+Fou vs Roi+Fou avec fous sur des cases de meme couleur (ils ne se croisent jamais)
+        def pieces_restantes(couleur):
+            return [p for p in self.board.get_all_pieces(couleur)
+                    if not isinstance(p, King)]
+
+        blancs = pieces_restantes(WHITE)
+        noirs  = pieces_restantes(BLACK)
+
+        # Roi seul vs Roi seul
+        if len(blancs) == 0 and len(noirs) == 0:
+            return True
+
+        # Roi + piece mineure vs Roi seul
+        if len(blancs) == 0 and len(noirs) == 1 and isinstance(noirs[0], (Bishop, Knight)):
+            return True
+        if len(noirs) == 0 and len(blancs) == 1 and isinstance(blancs[0], (Bishop, Knight)):
+            return True
+
+        # Roi + Fou vs Roi + Fou (fous de meme couleur de case)
+        if (len(blancs) == 1 and len(noirs) == 1
+                and isinstance(blancs[0], Bishop)
+                and isinstance(noirs[0], Bishop)):
+            def couleur_case(pos):
+                return (pos.col_index() + pos.row_index()) % 2
+            if couleur_case(blancs[0].get_position()) == couleur_case(noirs[0].get_position()):
+                return True
+
+        return False
+
+    def save_game(self, filepath: str = SAVE_FILE):
+        # Convertit toute la partie en dictionnaire Python puis l'ecrit en JSON sur le disque
+        data = {
+            'board': self.board.to_dict(),
+            'players': [{'name': p.get_name(), 'color': p.get_color(),
+                         'is_ai': isinstance(p, AIPlayer)} for p in self.players],
+            'current_player_index': self.players.index(self.currentPlayer)
+        }
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load_game(self, filepath: str = SAVE_FILE) -> bool:
+        # Relit le fichier JSON et reconstruit le plateau + les joueurs
+        if not os.path.exists(filepath): return False
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        self.board   = Board.from_dict(data['board'])
+        self.players = []
+        for pd in data['players']:
+            cls = AIPlayer if pd['is_ai'] else Player
+            self.players.append(cls(pd['name'], pd['color']))
+        self.currentPlayer = self.players[data['current_player_index']]
+        return True
 
 
-# LANCEMENT
+#  BOUTON
 
-    jeu = Jeu()
+class Button:
+    def __init__(self, x, y, w, h, label):
+        self.rect  = pygame.Rect(x, y, w, h)
+        self.label = label
 
-    if os.path.exists("sauvegarde.json"):
-        rep = input("Une sauvegarde existe. Charger ? (o/n) : ").strip().lower()
-        if rep == 'o':
-            jeu.charger()
+    def draw(self, surface, font, mouse_pos):
+        color = BTN_HOVER if self.rect.collidepoint(mouse_pos) else BTN_COLOR
+        pygame.draw.rect(surface, color,      self.rect, border_radius=6)
+        pygame.draw.rect(surface, BTN_BORDER, self.rect, 2, border_radius=6)
+        txt = font.render(self.label, True, BTN_TEXT)
+        surface.blit(txt, txt.get_rect(center=self.rect.center))
+
+    def is_clicked(self, event):
+        return (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and self.rect.collidepoint(event.pos))
+
+
+
+#  INTERFACE  (affichage pygame + interactions)
+
+class ChessUI:
+    def __init__(self):
+        pygame.init()
+        pygame.display.set_caption("Echecs Medievaux")
+        self.screen  = pygame.display.set_mode((WIN_W, WIN_H))
+        self.clock   = pygame.time.Clock()
+
+        self.font_piece  = pygame.font.SysFont(PIECE_FONT_NAME, PIECE_FONT_SIZE, bold=True)
+        self.font_label  = pygame.font.SysFont(LABEL_FONT_NAME, LABEL_FONT_SIZE)
+        self.font_info   = pygame.font.SysFont(INFO_FONT_NAME,  INFO_FONT_SIZE)
+        self.font_title  = pygame.font.SysFont(INFO_FONT_NAME,  TITLE_FONT_SIZE, bold=True)
+        self.font_btn    = pygame.font.SysFont(INFO_FONT_NAME,  INFO_FONT_SIZE,  bold=True)
+
+        self.game         = Chess()
+        self.selected_pos = None
+        self.valid_moves  = []
+        self.message      = ""
+        self.game_over    = False
+        self.winner       = None
+        self.end_reason   = ""
+        self.last_move_from = None   # case de départ du dernier coup joué
+        self.last_move_to   = None   # case d'arrivée du dernier coup joué
+        self.overlay      = pygame.Surface((SQUARE_SIZE, SQUARE_SIZE), pygame.SRCALPHA)
+
+        img_size = SQUARE_SIZE - 10
+        self.piece_images = {}
+        for key, (file_w, file_b) in PIECE_SYMBOLS.items():
+            try:
+                path_w = os.path.join(PIECE_FOLDER, file_w)
+                path_b = os.path.join(PIECE_FOLDER, file_b)
+                img_w  = pygame.image.load(path_w).convert_alpha()
+                img_b  = pygame.image.load(path_b).convert_alpha()
+                self.piece_images[key] = (
+                    pygame.transform.smoothscale(img_w, (img_size, img_size)),
+                    pygame.transform.smoothscale(img_b, (img_size, img_size)),
+                )
+            except Exception as e:
+                print(f"Image manquante : {file_w} ou {file_b} ({e})")
+                self.piece_images[key] = None
+
+        bx, bw, bh = PANEL_X + 10, PANEL_WIDTH - 20, 36
+        self.btn_save    = Button(bx, WIN_H - 130, bw, bh, "Sauvegarder")
+        self.btn_load    = Button(bx, WIN_H - 85,  bw, bh, "Charger")
+        self.btn_restart = Button(bx, WIN_H - 40,  bw, bh, "Nouvelle partie")
+
+        self._show_start_screen()
+
+    def _pos_to_pixel(self, pos: Position):
+        return (BOARD_X + pos.col_index() * SQUARE_SIZE,
+                BOARD_Y + (7 - pos.row_index()) * SQUARE_SIZE)
+
+    def _pixel_to_pos(self, px, py):
+        col = (px - BOARD_X) // SQUARE_SIZE
+        row = 7 - (py - BOARD_Y) // SQUARE_SIZE
+        if 0 <= col <= 7 and 0 <= row <= 7:
+            return Position(VALID_COLUMNS[col], row + 1)
+        return None
+
+    def _text(self, surf, txt, font, color, cx, cy):
+        s = font.render(txt, True, color)
+        surf.blit(s, s.get_rect(center=(cx, cy)))
+
+    def _wrap(self, text, font, max_w):
+        words, lines, cur = text.split(), [], ""
+        for w in words:
+            t = (cur + " " + w).strip()
+            if font.size(t)[0] <= max_w: cur = t
+            else:
+                if cur: lines.append(cur)
+                cur = w
+        if cur: lines.append(cur)
+        return lines
+
+    def _show_start_screen(self):
+        names, active, rot_mode = ["", ""], 0, False
+        labels = ["Blancs", "Noirs"]
+        while True:
+            self.screen.fill(BG_COLOR)
+            self._text(self.screen, "ECHECS MEDIEVAUX",
+                       self.font_title, PANEL_TEXT, WIN_W // 2, WIN_H // 2 - 140)
+            self._text(self.screen, "Entrez vos noms  (AI = ordinateur)",
+                       self.font_info, PANEL_TEXT2, WIN_W // 2, WIN_H // 2 - 105)
+
+            for i in range(2):
+                lx, ly = WIN_W // 2 - 150, WIN_H // 2 - 65 + i * 65
+                self.screen.blit(
+                    self.font_info.render(labels[i], True, PANEL_TEXT), (lx, ly))
+                box = pygame.Rect(lx, ly + 22, 300, 36)
+                pygame.draw.rect(self.screen, (60, 35, 10), box, border_radius=5)
+                pygame.draw.rect(self.screen,
+                                 PANEL_BORDER if active == i else (80, 55, 20),
+                                 box, 2, border_radius=5)
+                self.screen.blit(
+                    self.font_info.render(
+                        names[i] + ("|" if active == i else ""), True, PANEL_TEXT),
+                    (box.x + 8, box.y + 8))
+
+            mx, my = pygame.mouse.get_pos()
+            cb_rect = pygame.Rect(WIN_W // 2 - 150, WIN_H // 2 + 50, 22, 22)
+            pygame.draw.rect(self.screen, (60, 35, 10), cb_rect, border_radius=4)
+            pygame.draw.rect(self.screen, PANEL_BORDER, cb_rect, 2, border_radius=4)
+            if rot_mode:
+                pygame.draw.line(self.screen, PANEL_TEXT,
+                                 (cb_rect.x+3, cb_rect.y+11), (cb_rect.x+9, cb_rect.y+17), 2)
+                pygame.draw.line(self.screen, PANEL_TEXT,
+                                 (cb_rect.x+9, cb_rect.y+17), (cb_rect.x+19, cb_rect.y+5), 2)
+            self.screen.blit(
+                self.font_info.render("Mode plateau tournant (tous les 2 tours)", True,
+                                      PANEL_TEXT if rot_mode else PANEL_TEXT2),
+                (cb_rect.right + 10, cb_rect.y + 2))
+            self.screen.blit(
+                self.font_info.render("Le plateau tourne de 90° et les pions suivent !",
+                                      True, (150, 110, 50)),
+                (WIN_W // 2 - 150, WIN_H // 2 + 76))
+
+            sr = pygame.Rect(WIN_W // 2 - 80, WIN_H // 2 + 110, 160, 40)
+            pygame.draw.rect(self.screen,
+                             BTN_HOVER if sr.collidepoint(mx, my) else BTN_COLOR,
+                             sr, border_radius=8)
+            pygame.draw.rect(self.screen, BTN_BORDER, sr, 2, border_radius=8)
+            self._text(self.screen, "Commencer", self.font_btn, BTN_TEXT,
+                       sr.centerx, sr.centery)
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    for i in range(2):
+                        box = pygame.Rect(WIN_W // 2 - 150,
+                                          WIN_H // 2 - 43 + i * 65, 300, 36)
+                        if box.collidepoint(event.pos): active = i
+                    if cb_rect.collidepoint(event.pos):
+                        rot_mode = not rot_mode
+                    if sr.collidepoint(event.pos):
+                        self._init_game(names, rot_mode); return
+                if event.type == pygame.KEYDOWN:
+                    if   event.key == pygame.K_TAB:       active = 1 - active
+                    elif event.key == pygame.K_RETURN:
+                        if active == 0: active = 1
+                        else: self._init_game(names, rot_mode); return
+                    elif event.key == pygame.K_BACKSPACE:  names[active] = names[active][:-1]
+                    elif len(names[active]) < 20:           names[active] += event.unicode
+
+    def _init_game(self, names, rotation_mode=False):
+        self.game = Chess()
+        for i, (name, color) in enumerate(zip(names, [WHITE, BLACK])):
+            n = name.strip() or f"Joueur{i + 1}"
+            if n.upper() == "AI":
+                label = "Blancs" if color == WHITE else "Noirs"
+                self.game.players.append(AIPlayer(f"IA_{label}", color))
+            else:
+                self.game.players.append(Player(n, color))
+        self.game.currentPlayer = self.game.players[0]
+        self.selected_pos   = None
+        self.valid_moves    = []
+        self.message        = ""
+        self.game_over      = False
+        self.winner         = None
+        self.end_reason     = ""
+        self.last_move_from = None
+        self.last_move_to   = None
+        self.rotation_mode  = rotation_mode   # mode plateau tournant
+        self.turn_count     = 0               # nb de coups joués
+        self.rotation_angle = 0              # angle affiché (0,90,180,270)
+        self.rotating       = False           # animation en cours
+
+    def _compute_valid_moves(self, pos: Position):
+        piece = self.game.board.getPiece(pos)
+        if piece is None or piece.get_color() != self.game.currentPlayer.get_color():
+            return []
+        color = self.game.currentPlayer.get_color()
+        moves = []
+        for col in VALID_COLUMNS:
+            for row in range(1, 9):
+                dest = Position(col, row)
+                if dest == pos: continue
+                try:
+                    if piece.isValidMove(dest, self.game.board):
+                        if isinstance(piece, King) and abs(dest.col_index() - pos.col_index()) == 2:
+                            dc = dest.col_index() - pos.col_index()
+                            if self.game.is_castling_valid(piece, dc > 0):
+                                moves.append(dest)
+                        else:
+                            if not self.game._move_leaves_king_in_check(piece, dest, color):
+                                moves.append(dest)
+                except Exception:
+                    pass
+        return moves
+
+    def _draw_board(self):
+        check_positions = set()
+        if not self.game_over:
+            for color in (WHITE, BLACK):
+                if self.game._is_in_check(color):
+                    king = self.game._find_king(color)
+                    if king: check_positions.add(king.get_position())
+
+        for ci, col in enumerate(VALID_COLUMNS):
+            for row in range(1, 9):
+                pos    = Position(col, row)
+                px, py = self._pos_to_pixel(pos)
+                base   = COLOR_LIGHT if (ci + row) % 2 == 0 else COLOR_DARK
+                pygame.draw.rect(self.screen, base, (px, py, SQUARE_SIZE, SQUARE_SIZE))
+
+                if self.selected_pos == pos:
+                    self.overlay.fill(COLOR_SELECT)
+                    self.screen.blit(self.overlay, (px, py))
+                elif pos in self.valid_moves:
+                    self.overlay.fill(COLOR_MOVE)
+                    self.screen.blit(self.overlay, (px, py))
+                    pygame.draw.circle(self.screen, (50, 160, 50),
+                                       (px + SQUARE_SIZE // 2, py + SQUARE_SIZE // 2), 10)
+                elif pos in check_positions:
+                    self.overlay.fill(COLOR_CHECK)
+                    self.screen.blit(self.overlay, (px, py))
+                elif pos == self.last_move_from or pos == self.last_move_to:
+                    self.overlay.fill(COLOR_LAST)
+                    self.screen.blit(self.overlay, (px, py))
+                    pygame.draw.rect(self.screen, (70, 130, 220),
+                                     (px + 2, py + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4), 3)
+
+        pygame.draw.rect(self.screen, PANEL_BORDER,
+                         (BOARD_X - 3, BOARD_Y - 3, BOARD_SIZE + 6, BOARD_SIZE + 6), 3)
+
+    def _draw_pieces(self):
+        for col in VALID_COLUMNS:
+            for row in range(1, 9):
+                pos   = Position(col, row)
+                piece = self.game.board.getPiece(pos)
+                if piece is None: continue
+                px, py = self._pos_to_pixel(pos)
+                cx, cy = px + SQUARE_SIZE // 2, py + SQUARE_SIZE // 2
+                imgs = self.piece_images.get(str(piece))
+                if imgs is None: continue          # image manquante : on ne plante pas
+                img = imgs[0 if piece.is_white() else 1]
+                self.screen.blit(img, img.get_rect(center=(cx, cy)))
+
+    def _draw_labels(self):
+        for i, col in enumerate(VALID_COLUMNS):
+            x = BOARD_X + i * SQUARE_SIZE + SQUARE_SIZE // 2
+            for y in [BOARD_Y - 25, BOARD_Y + BOARD_SIZE + 8]:
+                s = self.font_label.render(col, True, LABEL_COLOR)
+                self.screen.blit(s, s.get_rect(center=(x, y)))
+        for row in range(1, 9):
+            y = BOARD_Y + (7 - (row - 1)) * SQUARE_SIZE + SQUARE_SIZE // 2
+            for x in [BOARD_X - 22, BOARD_X + BOARD_SIZE + 22]:
+                s = self.font_label.render(str(row), True, LABEL_COLOR)
+                self.screen.blit(s, s.get_rect(center=(x, y)))
+
+    def _draw_panel(self):
+        pygame.draw.rect(self.screen, PANEL_BG, (PANEL_X, 0, PANEL_WIDTH + 10, WIN_H))
+        pygame.draw.line(self.screen, PANEL_BORDER, (PANEL_X, 0), (PANEL_X, WIN_H), 2)
+
+        y = 15
+        self._text(self.screen, "ECHECS MEDIEVAUX", self.font_title,
+                   PANEL_TEXT, PANEL_X + PANEL_WIDTH // 2, y + 12)
+        y += 40
+        pygame.draw.line(self.screen, PANEL_BORDER,
+                         (PANEL_X + 10, y), (PANEL_X + PANEL_WIDTH, y))
+        y += 14
+
+        if not self.game_over and self.game.currentPlayer:
+            cp   = self.game.currentPlayer
+            icon = "Blancs" if cp.is_white() else "Noirs"
+            self.screen.blit(
+                self.font_info.render(f"Tour de :", True, PANEL_TEXT2), (PANEL_X + 12, y))
+            y += 22
+            self.screen.blit(
+                self.font_info.render(f"  {cp.get_name()} ({icon})", True, PANEL_TEXT),
+                (PANEL_X + 12, y))
+            y += 28
+            if self.game._is_in_check(cp.get_color()):
+                self.screen.blit(
+                    self.font_info.render("EN ECHEC !", True, (220, 80, 80)),
+                    (PANEL_X + 12, y))
+                y += 26
+
+        elif self.game_over and self.winner:
+            for line, col in [
+                ("VICTOIRE !", (255, 200, 50)),
+                (self.winner.get_name(), PANEL_TEXT),
+                ("ECHEC ET MAT", (200, 100, 100))
+            ]:
+                self.screen.blit(self.font_info.render(line, True, col), (PANEL_X + 12, y))
+                y += 26
+
+        y += 8
+        pygame.draw.line(self.screen, PANEL_BORDER,
+                         (PANEL_X + 10, y), (PANEL_X + PANEL_WIDTH, y))
+        y += 14
+
+        for player in self.game.players:
+            icon = "B" if player.is_white() else "N"
+            tag  = " (IA)" if isinstance(player, AIPlayer) else ""
+            s = self.font_info.render(f"[{icon}] {player.get_name()}{tag}", True, PANEL_TEXT2)
+            self.screen.blit(s, (PANEL_X + 12, y)); y += 22
+
+        if self.rotation_mode:
+            next_rot = 2 - (self.turn_count % 2)
+            s = self.font_info.render(f"Rotation dans : {next_rot} coup(s)",
+                                      True, (180, 140, 60))
+            self.screen.blit(s, (PANEL_X + 12, y)); y += 20
+
+        y += 8
+        pygame.draw.line(self.screen, PANEL_BORDER,
+                         (PANEL_X + 10, y), (PANEL_X + PANEL_WIDTH, y))
+        y += 14
+
+        self.screen.blit(
+            self.font_info.render("Captures :", True, PANEL_TEXT2), (PANEL_X + 12, y))
+        y += 22
+        captured = self.game.board.get_captured()
+        PIECE_LETTERS = {'K': 'Roi', 'Q': 'Rei', 'R': 'Tour', 'B': 'Fou', 'N': 'Cav', 'P': 'P'}
+        for label, pieces in [
+            ("Blancs :", [p for p in captured if p.get_color() == BLACK]),
+            ("Noirs  :", [p for p in captured if p.get_color() == WHITE]),
+        ]:
+            syms = " ".join(PIECE_LETTERS.get(str(p), str(p)) for p in pieces)
+            for chunk in self._wrap(f"{label} {syms or '-'}", self.font_info, PANEL_WIDTH - 20):
+                self.screen.blit(
+                    self.font_info.render(chunk, True, PANEL_TEXT), (PANEL_X + 12, y))
+                y += 20
+
+        y += 8
+        pygame.draw.line(self.screen, PANEL_BORDER,
+                         (PANEL_X + 10, y), (PANEL_X + PANEL_WIDTH, y))
+        y += 14
+
+        if self.message:
+            for line in self._wrap(self.message, self.font_info, PANEL_WIDTH - 20):
+                self.screen.blit(
+                    self.font_info.render(line, True, (200, 160, 80)), (PANEL_X + 12, y))
+                y += 20
+
+        mp = pygame.mouse.get_pos()
+        self.btn_save.draw(self.screen,    self.font_btn, mp)
+        self.btn_load.draw(self.screen,    self.font_btn, mp)
+        self.btn_restart.draw(self.screen, self.font_btn, mp)
+
+    def _check_game_over(self):
+        self.turn_count += 1
+        if self.rotation_mode and self.turn_count % 2 == 0:
+            self._animate_rotation()
+        if self.game.isCheckMate():
+            self.game_over = True
+            self.winner = (self.game.players[1]
+                           if self.game.currentPlayer is self.game.players[0]
+                           else self.game.players[0])
+            self.end_reason = "ECHEC ET MAT"
+        elif self.game.isStalemate():
+            self.game_over  = True
+            self.winner     = None
+            self.end_reason = "EGALITE (PAT)"
+        elif self.game.isInsufficientMaterial():
+            self.game_over  = True
+            self.winner     = None
+            self.end_reason = "EGALITE (MATERIEL INSUFFISANT)"
+    def _animate_rotation(self):
+        """Anime la rotation du plateau de 90° puis applique rotate90() sur le Board."""
+        steps  = 18          # nombre de frames
+        deg_per_step = 90 / steps
+        cx = BOARD_X + BOARD_SIZE // 2
+        cy = BOARD_Y + BOARD_SIZE // 2
+
+        board_surf = pygame.Surface((BOARD_SIZE, BOARD_SIZE), pygame.SRCALPHA)
+        for ci, col in enumerate(VALID_COLUMNS):
+            for row in range(1, 9):
+                pos    = Position(col, row)
+                px     = ci * SQUARE_SIZE
+                py     = (7 - (row - 1)) * SQUARE_SIZE
+                base   = COLOR_LIGHT if (ci + row) % 2 == 0 else COLOR_DARK
+                pygame.draw.rect(board_surf, base, (px, py, SQUARE_SIZE, SQUARE_SIZE))
+                piece = self.game.board.getPiece(pos)
+                if piece:
+                    imgs = self.piece_images.get(str(piece))
+                    if imgs:
+                        img = imgs[0 if piece.is_white() else 1]
+                        board_surf.blit(img, img.get_rect(
+                            center=(px + SQUARE_SIZE//2, py + SQUARE_SIZE//2)))
+
+        for step in range(steps + 1):
+            angle = step * deg_per_step
+            rotated = pygame.transform.rotate(board_surf, -angle)
+            scale = BOARD_SIZE / max(rotated.get_width(), rotated.get_height())
+            if scale < 1:
+                nw = int(rotated.get_width()  * scale)
+                nh = int(rotated.get_height() * scale)
+                rotated = pygame.transform.smoothscale(rotated, (nw, nh))
+
+            self.screen.fill(BG_COLOR)
+            self._draw_labels()
+            self._draw_panel()
+            self.screen.blit(rotated, rotated.get_rect(center=(cx, cy)))
+            pygame.display.flip()
+            self.clock.tick(60)
+            pygame.event.pump()   # éviter que la fenêtre freeze
+
+        self.game.board.rotate90()
+        self.selected_pos   = None
+        self.valid_moves    = []
+        self.last_move_from = None
+        self.last_move_to   = None
+        self.message        = "Plateau tourne !"
+
+    def _show_promotion_menu(self, pos: Position, color: int):
+        """Affiche un menu pour choisir la pièce de promotion."""
+        options   = [Queen, Rook, Bishop, Knight]
+        labels    = ["Reine", "Tour", "Fou", "Cavalier"]
+        keys      = ['Q',     'R',    'B',   'N']
+        bw, bh    = 120, 50
+        total_w   = len(options) * bw + (len(options) - 1) * 10
+        sx        = WIN_W // 2 - total_w // 2
+        sy        = WIN_H // 2 - bh // 2
+        rects     = [pygame.Rect(sx + i * (bw + 10), sy, bw, bh) for i in range(len(options))]
+
+        choosing = True
+        while choosing:
+            self.screen.fill(BG_COLOR)
+            self._draw_board(); self._draw_pieces(); self._draw_labels(); self._draw_panel()
+            overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            self.screen.blit(overlay, (0, 0))
+            self._text(self.screen, "Choisissez la promotion :",
+                       self.font_title, PANEL_TEXT, WIN_W // 2, sy - 40)
+
+            mx, my = pygame.mouse.get_pos()
+            for i, (rect, label) in enumerate(zip(rects, labels)):
+                col = BTN_HOVER if rect.collidepoint(mx, my) else BTN_COLOR
+                pygame.draw.rect(self.screen, col,        rect, border_radius=8)
+                pygame.draw.rect(self.screen, BTN_BORDER, rect, 2, border_radius=8)
+                img_key = keys[i]
+                imgs = self.piece_images.get(img_key)
+                if imgs:
+                    img = imgs[0 if color == WHITE else 1]
+                    self.screen.blit(img, img.get_rect(center=(rect.centerx, rect.centery - 8)))
+                self._text(self.screen, label, self.font_info, BTN_TEXT,
+                           rect.centerx, rect.bottom - 14)
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    for i, rect in enumerate(rects):
+                        if rect.collidepoint(event.pos):
+                            self.game.promote_pawn(pos, options[i])
+                            choosing = False
+                            break
+
+        self.game.switchPlayer()
+        self._check_game_over()
+
+    def _do_ai_turn(self):
+        if self.game_over: return
+        cp = self.game.currentPlayer
+        if not isinstance(cp, AIPlayer): return
+        pygame.time.delay(400)
+        move = cp.askMove(board=self.game.board, chess=self.game)
+        if not move:
+            self.game_over = True
+            self.winner    = self.game.players[0 if cp.get_color() == BLACK else 1]
+            self.message   = "L'IA n'a plus de coup !"
+            return
+        if self.game.isValidMove(move):
+            try:
+                _, fp, _, tp = self.game._parse_move(move)
+                self.last_move_from = fp
+                self.last_move_to   = tp
+            except Exception:
+                pass
+            self.game.updateBoard(move)
+            self.message = f"IA : {move}"
+            if self.game.isCheckMate():
+                self.game_over = True; self.winner = cp
+            else:
+                self.game.switchPlayer()
         else:
-            jeu.jouer()
-            jeu = Jeu()  # nouvelle partie apres la fin
+            self.message = "Coup IA invalide."
 
-    jeu.jouer()
+    def _handle_click(self, px, py):
+        if self.game_over: return
+        clicked = self._pixel_to_pos(px, py)
+        if clicked is None: return
+        cp       = self.game.currentPlayer
+        if isinstance(cp, AIPlayer): return
+        piece_at = self.game.board.getPiece(clicked)
+
+        if self.selected_pos is None:
+            if piece_at and piece_at.get_color() == cp.get_color():
+                self.selected_pos = clicked
+                self.valid_moves  = self._compute_valid_moves(clicked)
+                self.message      = f"Piece selectionnee : {clicked}"
+            else:
+                self.message = "Selectionne une de tes pieces."
+            return
+
+        if piece_at and piece_at.get_color() == cp.get_color():
+            selected_piece = self.game.board.getPiece(self.selected_pos)
+            if isinstance(selected_piece, King) and isinstance(piece_at, Rook):
+                king     = selected_piece
+                rook_pos = clicked
+                kingside = rook_pos.col_index() > self.selected_pos.col_index()
+                if self.game.is_castling_valid(king, kingside):
+                    row      = self.selected_pos.get_row()
+                    king_dest = Position('g' if kingside else 'c', row)
+                    rook_dest = Position('f' if kingside else 'd', row)
+                    self.last_move_from = self.selected_pos
+                    self.last_move_to   = king_dest
+                    self.game.board.castle_move(king, piece_at, king_dest, rook_dest)
+                    self.message      = f"Roque {'petit' if kingside else 'grand'} !"
+                    self.selected_pos = None
+                    self.valid_moves  = []
+                    if self.game.isCheckMate():
+                        self.game_over = True; self.winner = cp
+                    else:
+                        self.game.switchPlayer()
+                    return
+            self.selected_pos = clicked
+            self.valid_moves  = self._compute_valid_moves(clicked)
+            self.message      = f"Piece selectionnee : {clicked}"
+            return
+
+        piece = self.game.board.getPiece(self.selected_pos)
+        if piece is None:
+            self.selected_pos = None; self.valid_moves = []; return
+
+        move_str = f"{str(piece).upper()}{self.selected_pos} {str(piece).upper()}{clicked}"
+        if self.game.isValidMove(move_str):
+            self.last_move_from = self.selected_pos
+            self.last_move_to   = clicked
+            self.game.updateBoard(move_str)
+            self.message      = f"{self.selected_pos} -> {clicked}"
+            self.selected_pos = None
+            self.valid_moves  = []
+            piece_moved = self.game.board.getPiece(clicked)
+            if isinstance(piece_moved, Pawn) and piece_moved.is_at_promotion():
+                self._show_promotion_menu(clicked, piece_moved.get_color())
+                return  # switchPlayer après la promotion
+            self.game.switchPlayer()
+            self._check_game_over()
+        else:
+            self.message      = "Deplacement invalide."
+            self.selected_pos = None
+            self.valid_moves  = []
+
+    def run(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    px, py = event.pos
+                    if (BOARD_X <= px < BOARD_X + BOARD_SIZE and
+                            BOARD_Y <= py < BOARD_Y + BOARD_SIZE):
+                        self._handle_click(px, py)
+
+                    if self.btn_save.is_clicked(event):
+                        self.game.save_game()
+                        self.message = "Partie sauvegardee !"
+
+                    if self.btn_load.is_clicked(event):
+                        if self.game.load_game():
+                            self.selected_pos = None; self.valid_moves = []
+                            self.game_over = False;   self.winner = None
+                            self.message   = "Partie chargee !"
+                        else:
+                            self.message = "Aucune sauvegarde trouvee."
+
+                    if self.btn_restart.is_clicked(event):
+                        self.selected_pos = None; self.valid_moves = []
+                        self.message = ""
+                        self._show_start_screen()
+
+            if (not self.game_over and self.game.currentPlayer and
+                    isinstance(self.game.currentPlayer, AIPlayer)):
+                self._do_ai_turn()
+
+            self.screen.fill(BG_COLOR)
+            self._draw_board()
+            self._draw_pieces()
+            self._draw_labels()
+            self._draw_panel()
+
+            if self.game_over:
+                ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+                ov.fill((0, 0, 0, 150))
+                self.screen.blit(ov, (0, 0))
+                self._text(self.screen, self.end_reason,
+                           self.font_title, (255, 210, 50), WIN_W // 2, WIN_H // 2 - 40)
+                if self.winner:
+                    self._text(self.screen, f"{self.winner.get_name()} remporte la partie !",
+                               self.font_info, (240, 200, 120), WIN_W // 2, WIN_H // 2)
+                else:
+                    self._text(self.screen, "Aucun gagnant — partie nulle !",
+                               self.font_info, (200, 200, 200), WIN_W // 2, WIN_H // 2)
+                self._text(self.screen, "Cliquez sur Nouvelle partie",
+                           self.font_info, PANEL_TEXT2, WIN_W // 2, WIN_H // 2 + 45)
+
+            pygame.display.flip()
+            self.clock.tick(60)
