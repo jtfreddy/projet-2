@@ -11,17 +11,17 @@ except ImportError:
     print("ERREUR : pygame n'est pas installé.  Lance : pip install pygame")
     sys.exit(1)
 
-SQUARE_SIZE  = 80    # pixels par case
-BOARD_MARGIN = 60    # marge autour du plateau
-PANEL_WIDTH  = 230   # largeur du panneau latéral
+SQUARE_SIZE  = 80
+BOARD_MARGIN = 60
+PANEL_WIDTH  = 230
 
-COLOR_LIGHT  = (240, 217, 181)      # cases claires → beige parchemin
-COLOR_DARK   = (139,  90,  43)      # cases sombres → brun médiéval
+COLOR_LIGHT  = (240, 217, 181)
+COLOR_DARK   = (139,  90,  43)
 
-COLOR_SELECT = (255, 215,   0, 160) # pièce sélectionnée → or
-COLOR_MOVE   = (100, 200, 100, 130) # destinations légales → vert
-COLOR_CHECK  = (220,  50,  50, 160) # roi en échec → rouge
-COLOR_LAST   = ( 70, 130, 220, 140) # dernier coup → bleu
+COLOR_SELECT = (255, 215,   0, 160) # pièce sélectionnée
+COLOR_MOVE   = (100, 200, 100, 130) # deplacement autorisé
+COLOR_CHECK  = (220,  50,  50, 160) # roi en échec
+COLOR_LAST   = ( 70, 130, 220, 140) # dernier coup
 
 PANEL_BG     = ( 45,  25,  10)
 PANEL_BORDER = (180, 120,  40)
@@ -41,6 +41,7 @@ INFO_FONT_SIZE  = 17
 TITLE_FONT_SIZE = 22
 
 PIECE_FOLDER = "piece"
+
 PIECE_SYMBOLS = {
     'K': ('roi_b.png',      'roi_n.png'),
     'Q': ('reine_b.png',    'reine_n.png'),
@@ -50,9 +51,9 @@ PIECE_SYMBOLS = {
     'P': ('pion_b.png',     'pion_n.png'),
 }
 
-PIECE_COLOR_WHITE = (255, 245, 220)  # ivoire
-PIECE_COLOR_BLACK = ( 20,   5,   0)  # noir profond
-PIECE_SHADOW      = ( 80,  40,   0)  # ombre légère
+PIECE_COLOR_WHITE = (255, 245, 220)
+PIECE_COLOR_BLACK = ( 20,   5,   0)
+PIECE_SHADOW      = ( 80,  40,   0)
 
 BTN_COLOR  = ( 80,  45,  10)
 BTN_HOVER  = (120,  70,  20)
@@ -71,6 +72,8 @@ WIN_H      = BOARD_MARGIN + BOARD_SIZE + BOARD_MARGIN
 BOARD_X    = BOARD_MARGIN
 BOARD_Y    = BOARD_MARGIN
 PANEL_X    = BOARD_X + BOARD_SIZE + BOARD_MARGIN
+
+#  1.  POSITION
 
 class Position:
     """Représente une case de l'échiquier (ex: 'e4')."""
@@ -100,9 +103,12 @@ class Position:
 
     @staticmethod
     def from_string(s: str) -> "Position":
+        # Convertit la chaine 'e4' en Position('e', 4)
         if len(s) != 2:
             raise ValueError(f"Position invalide : '{s}'")
         return Position(s[0].lower(), int(s[1]))
+
+#  2.  PIECE  (classe abstraite de base)
 
 class Piece(ABC):
     def __init__(self, position: Position, color: int):
@@ -121,20 +127,27 @@ class Piece(ABC):
     def __str__(self) -> str: pass
 
     def _is_same_color_at(self, position: Position, board: "Board") -> bool:
+        # Vrai si une piece alliee occupe deja cette case (on ne peut pas manger les siennes)
         p = board.getPiece(position)
         return p is not None and p.get_color() == self._color
 
     def _path_clear(self, newPosition: Position, board: "Board") -> bool:
+        # Verifie qu'il n'y a aucune piece sur le trajet (utile pour la tour, le fou, la reine)
+        # On avance case par case dans la bonne direction jusqu'a la destination
         c1, r1 = self._position.col_index(), self._position.row_index()
         c2, r2 = newPosition.col_index(),    newPosition.row_index()
-        dc = 0 if c2 == c1 else (1 if c2 > c1 else -1)
-        dr = 0 if r2 == r1 else (1 if r2 > r1 else -1)
+        dc = 0 if c2 == c1 else (1 if c2 > c1 else -1)  # direction colonne : -1, 0 ou +1
+        dr = 0 if r2 == r1 else (1 if r2 > r1 else -1)  # direction rangee  : -1, 0 ou +1
         c, r = c1 + dc, r1 + dr
         while (c, r) != (c2, r2):
             if board.getPiece(Position(VALID_COLUMNS[c], r + 1)) is not None:
-                return False
+                return False  # une piece bloque le chemin
             c += dc; r += dr
         return True
+
+
+
+#  3-8. PIÈCES
 
 class King(Piece):
     def __str__(self): return 'K'
@@ -143,9 +156,9 @@ class King(Piece):
         dc = abs(newPosition.col_index() - self._position.col_index())
         dr = abs(newPosition.row_index() - self._position.row_index())
         if dc <= 1 and dr <= 1 and (dc + dr) > 0:
-            return True
+            return True  # deplacement normal : 1 case dans n'importe quelle direction
         if dr == 0 and dc == 2:
-            return True   # Chess.isValidMove() fera la vérification complète
+            return True  # format du roque - la validation complete se fait dans Chess.isValidMove()
         return False
 
 class Queen(Piece):
@@ -172,7 +185,7 @@ class Knight(Piece):
         if self._is_same_color_at(newPosition, board): return False
         dc = abs(newPosition.col_index() - self._position.col_index())
         dr = abs(newPosition.row_index() - self._position.row_index())
-        return (dc == 2 and dr == 1) or (dc == 1 and dr == 2)
+        return (dc == 2 and dr == 1) or (dc == 1 and dr == 2)  # deplacement en L, peut sauter par-dessus les autres
 
 class Rook(Piece):
     def __str__(self): return 'R'
@@ -186,7 +199,7 @@ class Rook(Piece):
 class Pawn(Piece):
     def __init__(self, position, color):
         super().__init__(position, color)
-        self._dir = 1 if color == WHITE else -1
+        self._dir = 1 if color == WHITE else -1  # +1 = vers rangee 8, -1 = vers rangee 1
 
     def __str__(self): return 'P'
 
@@ -196,8 +209,8 @@ class Pawn(Piece):
 
     def _start_row(self) -> bool:
         """Vrai si le pion est sur sa rangée de départ (peut avancer de 2)."""
-        if self._dir == 1: return self._position.row_index() == 1   # rangée 2
-        else:              return self._position.row_index() == 6   # rangée 7
+        if self._dir == 1: return self._position.row_index() == 1
+        else:              return self._position.row_index() == 6
 
     def isValidMove(self, newPosition, board):
         if self._is_same_color_at(newPosition, board): return False
@@ -206,19 +219,18 @@ class Pawn(Piece):
         dc, dr = cd - cn, rd - rn
 
         if dc == 0 and dr == self._dir:
-            return board.getPiece(newPosition) is None
+            return board.getPiece(newPosition) is None  # avance d'une case, doit etre vide
 
         if dc == 0 and dr == 2 * self._dir and self._start_row():
             mid = Position(VALID_COLUMNS[cn], rn + self._dir + 1)
-            return board.getPiece(mid) is None and board.getPiece(newPosition) is None
+            return board.getPiece(mid) is None and board.getPiece(newPosition) is None  # avance de 2 depuis la rangee de depart
 
         if abs(dc) == 1 and dr == self._dir:
             t = board.getPiece(newPosition)
             if t is not None and t.get_color() != self._color:
-                return True
-            # Prise en passant : case vide mais c'est la cible ep
+                return True  # capture en diagonale
             if t is None and newPosition == board.en_passant_target:
-                return True
+                return True  # prise en passant : la case est vide mais on capture quand meme le pion adverse
 
         return False
 
@@ -235,17 +247,22 @@ class Pawn(Piece):
 
 _PIECE_TYPE_MAP = {'K': King, 'Q': Queen, 'B': Bishop, 'N': Knight, 'R': Rook, 'P': Pawn}
 
+
+
+#  9.  BOARD
+
 class Board:
     """Échiquier : dictionnaire {Position → Piece} + liste de capturées."""
 
     def __init__(self):
-        self.__pieces:   dict = {}
-        self.__captured: list = []
-        self.__moved:    set  = set()
-        self.en_passant_target = None  # Position de la case prenable en passant (ou None)
+        self.__pieces:   dict = {}    # le plateau : Position -> Piece
+        self.__captured: list = []   # les pieces mangees
+        self.__moved:    set  = set()  # les pieces qui ont deja bouge (utile pour le roque)
+        self.en_passant_target = None  # case ou un pion peut etre pris en passant
         self._setup()
 
     def _setup(self):
+        # Place les 32 pieces a leurs positions de depart
         for i, cls in enumerate([Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook]):
             col = VALID_COLUMNS[i]
             self.__pieces[Position(col, 1)] = cls(Position(col, 1), WHITE)
@@ -274,16 +291,14 @@ class Board:
         return piece in self.__moved
 
     def rotate90(self):
-        """Fait tourner le plateau de 90° dans le sens horaire.
-        Transformation (0-based) : (c, r) → (r, 7-c)
-        Après rotation : tous les pions avancent vers le haut de l'écran (dir=+1).
-        """
+        # Mode plateau tournant : chaque case (c, r) devient (r, 7-c) — rotation horaire 90 degres
+        # On force aussi tous les pions a avancer vers le haut (dir=+1) apres la rotation
         new_pieces = {}
         for pos, piece in self.__pieces.items():
             c_idx = pos.col_index()
             r_idx = pos.row_index()
             new_col = VALID_COLUMNS[r_idx]
-            new_row = 8 - c_idx   # 1-base
+            new_row = 8 - c_idx   # 1-based
             new_pos = Position(new_col, new_row)
             piece.set_position(new_pos)
             if isinstance(piece, Pawn):
@@ -316,7 +331,7 @@ class Board:
         self.__pieces[new_position] = piece
         self.__moved.add(piece)
 
-        # Mettre a jour la cible en passant
+        # Si le pion vient d'avancer de 2 cases, la case qu'il a sautee devient prenable en passant
         if isinstance(piece, Pawn) and abs(new_position.row_index() - old.row_index()) == 2:
             # Le pion vient d'avancer de 2 : la case intermediaire devient prenable
             dir_ep = 1 if piece._dir == 1 else -1
@@ -372,6 +387,10 @@ class Board:
         b.en_passant_target = Position.from_string(ep) if ep else None
         return b
 
+
+
+#  10. PLAYER
+
 class Player:
     def __init__(self, name: str, color: int):
         self.__name  = name
@@ -382,6 +401,10 @@ class Player:
     def is_white(self)  -> bool: return self.__color == WHITE
     def __str__(self):
         return f"{self.__name} ({'Blancs' if self.__color == WHITE else 'Noirs'})"
+
+
+
+#  11. AIPLAYER
 
 class AIPlayer(Player):
     def __init__(self, name: str, color: int):
@@ -401,20 +424,22 @@ class AIPlayer(Player):
                 if dest == pos: continue
                 try:
                     if piece.isValidMove(dest, board):
-                        candidates.append((piece, pos, dest))
+                        candidates.append((piece, pos, dest))  # coup potentiellement jouable
                 except Exception:
                     continue
-        random.shuffle(candidates)
+        random.shuffle(candidates)  # on melange pour que l'IA ne joue pas toujours pareil
         for piece, pos, dest in candidates:
             try:
                 if chess and chess._move_leaves_king_in_check(piece, dest, color):
-                    continue
+                    continue  # ce coup exposerait le roi, on le saute
                 return f"{str(piece).upper()}{pos} {str(piece).upper()}{dest}"
             except Exception:
                 continue
         return ""
 
 _PIECE_LETTER_MAP = {'K': King, 'Q': Queen, 'B': Bishop, 'N': Knight, 'R': Rook, 'P': Pawn}
+
+#  12. CHESS
 
 class Chess:
     def __init__(self):
@@ -423,6 +448,7 @@ class Chess:
         self.currentPlayer: Player = None
 
     def _parse_move(self, move: str):
+        # Analyse la chaine 'Pe2 Pe4' et retourne (lettre, pos_depart, lettre, pos_arrivee)
         m = re.match(r'^([KQBNRP])([a-h][1-8])\s+([KQBNRP])([a-h][1-8])$',
                      move.strip(), re.IGNORECASE)
         if not m: raise ValueError(f"Format invalide : '{move}'")
@@ -430,14 +456,8 @@ class Chess:
                 m.group(3).upper(), Position.from_string(m.group(4).lower()))
 
     def is_castling_valid(self, king: "King", kingside: bool) -> bool:
-        """
-        Vérifie toutes les conditions du roque :
-        1. Ni le roi ni la tour concernée n'ont bougé
-        2. Les cases entre eux sont vides
-        3. Le roi n'est pas en échec
-        4. Le roi ne passe pas par une case menacée
-        5. La case d'arrivée du roi n'est pas menacée
-        """
+        # Verifie toutes les conditions du roque : pieces pas bougees, cases libres,
+        # roi pas en echec et ne traversant pas de case menacee
         color = king.get_color()
         opp   = BLACK if color == WHITE else WHITE
         row   = 1 if color == WHITE else 8
@@ -536,6 +556,9 @@ class Chess:
         return self._is_threatened(king.get_position(), BLACK if color == WHITE else WHITE)
 
     def _move_leaves_king_in_check(self, piece, dest, color):
+        # On simule le coup directement dans le dictionnaire sans passer par move_piece
+        # (pour ne pas modifier __moved ni declencher d'effets de bord)
+        # A la fin on annule tout pour revenir a l'etat d'avant
         old      = piece.get_position()
         captured = self.board.getPiece(dest)
 
@@ -603,13 +626,10 @@ class Chess:
         return not self._has_legal_move(color)
 
     def isInsufficientMaterial(self) -> bool:
-        """Egalite si aucun des deux camps ne peut mater.
-        Cas couverts :
-          - Roi seul vs Roi seul
-          - Roi + Fou vs Roi seul
-          - Roi + Cavalier vs Roi seul
-          - Roi + Fou vs Roi + Fou (meme couleur de case)
-        """
+        # Certaines configurations ne peuvent jamais aboutir a un mat
+        # meme avec le meilleur jeu des deux cotes — on declare alors la partie nulle
+        # Cas geres : Roi seul vs Roi seul, Roi+Fou vs Roi, Roi+Cavalier vs Roi,
+        # et Roi+Fou vs Roi+Fou avec fous sur des cases de meme couleur (ils ne se croisent jamais)
         def pieces_restantes(couleur):
             return [p for p in self.board.get_all_pieces(couleur)
                     if not isinstance(p, King)]
@@ -639,6 +659,7 @@ class Chess:
         return False
 
     def save_game(self, filepath: str = SAVE_FILE):
+        # Convertit toute la partie en dictionnaire Python puis l'ecrit en JSON sur le disque
         data = {
             'board': self.board.to_dict(),
             'players': [{'name': p.get_name(), 'color': p.get_color(),
@@ -649,6 +670,7 @@ class Chess:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load_game(self, filepath: str = SAVE_FILE) -> bool:
+        # Relit le fichier JSON et reconstruit le plateau + les joueurs
         if not os.path.exists(filepath): return False
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -659,6 +681,9 @@ class Chess:
             self.players.append(cls(pd['name'], pd['color']))
         self.currentPlayer = self.players[data['current_player_index']]
         return True
+
+
+#  BOUTON
 
 class Button:
     def __init__(self, x, y, w, h, label):
@@ -675,6 +700,10 @@ class Button:
     def is_clicked(self, event):
         return (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
                 and self.rect.collidepoint(event.pos))
+
+
+
+#  INTERFACE  (affichage pygame + interactions)
 
 class ChessUI:
     def __init__(self):
