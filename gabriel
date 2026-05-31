@@ -1,0 +1,263 @@
+
+
+
+class Bishop(Piece):
+    def __str__(self): return 'B'
+    def isValidMove(self, newPosition, board):
+        if self._is_same_color_at(newPosition, board): return False
+        dc = abs(newPosition.col_index() - self._position.col_index())
+        dr = abs(newPosition.row_index() - self._position.row_index())
+        if dc != dr or dc == 0: return False
+        return self._path_clear(newPosition, board)
+
+
+class Rook(Piece):
+    def __str__(self): return 'R'
+    def isValidMove(self, newPosition, board):
+        if self._is_same_color_at(newPosition, board): return False
+        dc = abs(newPosition.col_index() - self._position.col_index())
+        dr = abs(newPosition.row_index() - self._position.row_index())
+        if not ((dc == 0 and dr > 0) or (dr == 0 and dc > 0)): return False
+        return self._path_clear(newPosition, board)
+
+
+class Chess:
+    def __init__(self):
+        self.board:         Board  = Board()
+        self.players:       list   = []
+        self.currentPlayer: Player = None
+
+    def _parse_move(self, move: str):
+        # Analyse la chaine 'Pe2 Pe4' et retourne (lettre, pos_depart, lettre, pos_arrivee)
+        m = re.match(r'^([KQBNRP])([a-h][1-8])\s+([KQBNRP])([a-h][1-8])$',
+                     move.strip(), re.IGNORECASE)
+        if not m: raise ValueError(f"Format invalide : '{move}'")
+        return (m.group(1).upper(), Position.from_string(m.group(2).lower()),
+                m.group(3).upper(), Position.from_string(m.group(4).lower()))
+
+    def is_castling_valid(self, king: "King", kingside: bool) -> bool:
+        # Verifie toutes les conditions du roque : pieces pas bougees, cases libres,
+        # roi pas en echec et ne traversant pas de case menacee
+        color = king.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        row   = 1 if color == WHITE else 8
+
+        rook_col  = 'h' if kingside else 'a'
+        rook_pos  = Position(rook_col, row)
+        rook      = self.board.getPiece(rook_pos)
+        if rook is None or not isinstance(rook, Rook): return False
+        if rook.get_color() != color:                  return False
+
+        if self.board.has_moved(king): return False
+        if self.board.has_moved(rook): return False
+
+        king_col  = king.get_position().col_index()   # toujours 4 (colonne e)
+        rook_col_i = rook_pos.col_index()
+        step = 1 if rook_col_i > king_col else -1
+        for ci in range(king_col + step, rook_col_i, step):
+            if self.board.getPiece(Position(VALID_COLUMNS[ci], row)) is not None:
+                return False
+
+        if self._is_in_check(color): return False
+
+        dest_col = king_col + 2 * step   # case d'arrivée du roi
+        for ci in [king_col + step, dest_col]:
+            if self._is_threatened(Position(VALID_COLUMNS[ci], row), opp):
+                return False
+
+        return True
+
+    def isValidMove(self, move: str) -> bool:
+        try:
+            lf, fp, lt, tp = self._parse_move(move)
+        except ValueError:
+            return False
+        if lf != lt: return False
+        piece = self.board.getPiece(fp)
+        if piece is None: return False
+        if not isinstance(piece, _PIECE_LETTER_MAP[lf]): return False
+        if piece.get_color() != self.currentPlayer.get_color(): return False
+        if not piece.isValidMove(tp, self.board): return False
+
+        if isinstance(piece, King):
+            dc = tp.col_index() - fp.col_index()
+            if abs(dc) == 2:
+                kingside = dc > 0
+                return self.is_castling_valid(piece, kingside)
+
+        color = self.currentPlayer.get_color()
+        if self._move_leaves_king_in_check(piece, tp, color): return False
+        return True
+
+    def updateBoard(self, move: str):
+        _, fp, _, tp = self._parse_move(move)
+        piece = self.board.getPiece(fp)
+        if isinstance(piece, King):
+            dc = tp.col_index() - fp.col_index()
+            if abs(dc) == 2:
+                kingside  = dc > 0
+                row       = fp.get_row()
+                rook_from = Position('h' if kingside else 'a', row)
+                rook_to   = Position('f' if kingside else 'd', row)
+                rook      = self.board.getPiece(rook_from)
+                self.board.castle_move(piece, rook, tp, rook_to)
+                return
+        self.board.move_piece(piece, tp)
+
+    def promote_pawn(self, pos: Position, piece_class):
+        """Remplace le pion en 'pos' par la pièce choisie (appelé depuis l'UI)."""
+        pawn = self.board.getPiece(pos)
+        if pawn is None: return
+        new_piece = piece_class(pos, pawn.get_color())
+        self.board._Board__pieces[pos] = new_piece
+
+    def switchPlayer(self):
+        self.currentPlayer = (self.players[1] if self.currentPlayer is self.players[0]
+                              else self.players[0])
+
+    def _find_king(self, color: int):
+        for p in self.board.get_all_pieces(color):
+            if isinstance(p, King): return p
+        return None
+
+    def _is_threatened(self, position: Position, by_color: int) -> bool:
+        for p in self.board.get_all_pieces(by_color):
+            try:
+                if isinstance(p, Pawn):
+                    if p.threatens(position): return True
+                else:
+                    if p.isValidMove(position, self.board): return True
+            except Exception: continue
+        return False
+
+    def _is_in_check(self, color: int) -> bool:
+        king = self._find_king(color)
+        if king is None: return False
+        return self._is_threatened(king.get_position(), BLACK if color == WHITE else WHITE)
+
+    def _move_leaves_king_in_check(self, piece, dest, color):
+        # On simule le coup directement dans le dictionnaire sans passer par move_piece
+        # (pour ne pas modifier __moved ni declencher d'effets de bord)
+        # A la fin on annule tout pour revenir a l'etat d'avant
+        old      = piece.get_position()
+        captured = self.board.getPiece(dest)
+
+        del self.board._Board__pieces[old]
+        if captured is not None:
+            self.board._Board__pieces.pop(dest, None)
+        piece._position = dest
+        self.board._Board__pieces[dest] = piece
+
+        ep_pion = None
+        ep_pos  = None
+        if (isinstance(piece, Pawn) and dest == self.board.en_passant_target
+                and captured is None):
+            ep_pos  = Position(dest.get_column(), old.get_row())
+            ep_pion = self.board._Board__pieces.pop(ep_pos, None)
+            if ep_pion: ep_pion._position = None
+
+        king  = self._find_king(color)
+        still = king is not None and self._is_threatened(
+            king.get_position(), BLACK if color == WHITE else WHITE)
+
+        del self.board._Board__pieces[dest]
+        piece._position = old
+        self.board._Board__pieces[old] = piece
+        if captured is not None:
+            captured._position = dest
+            self.board._Board__pieces[dest] = captured
+        if ep_pion is not None:
+            ep_pion._position = ep_pos
+            self.board._Board__pieces[ep_pos] = ep_pion
+
+        return still
+
+    def _has_legal_move(self, color: int) -> bool:
+        """Retourne True si le joueur de cette couleur a au moins un coup légal."""
+        for piece in self.board.get_all_pieces(color):
+            for col in VALID_COLUMNS:
+                for row in range(1, 9):
+                    dest = Position(col, row)
+                    if dest == piece.get_position(): continue
+                    try:
+                        if not piece.isValidMove(dest, self.board): continue
+                        if isinstance(piece, King) and abs(dest.col_index() - piece.get_position().col_index()) == 2:
+                            continue  # le roque ne compte pas ici
+                        if not self._move_leaves_king_in_check(piece, dest, color):
+                            return True
+                    except Exception: continue
+        return False
+
+    def isCheckMate(self) -> bool:
+        """Vrai si le joueur courant est en échec ET n'a aucun coup légal."""
+        color = self.currentPlayer.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        king  = self._find_king(color)
+        if king is None: return True
+        if not self._is_threatened(king.get_position(), opp): return False
+        return not self._has_legal_move(color)
+
+    def isStalemate(self) -> bool:
+        color = self.currentPlayer.get_color()
+        opp   = BLACK if color == WHITE else WHITE
+        king  = self._find_king(color)
+        if king is None: return False
+        if self._is_threatened(king.get_position(), opp): return False
+        return not self._has_legal_move(color)
+
+    def isInsufficientMaterial(self) -> bool:
+        # Certaines configurations ne peuvent jamais aboutir a un mat
+        # meme avec le meilleur jeu des deux cotes — on declare alors la partie nulle
+        # Cas geres : Roi seul vs Roi seul, Roi+Fou vs Roi, Roi+Cavalier vs Roi,
+        # et Roi+Fou vs Roi+Fou avec fous sur des cases de meme couleur (ils ne se croisent jamais)
+        def pieces_restantes(couleur):
+            return [p for p in self.board.get_all_pieces(couleur)
+                    if not isinstance(p, King)]
+
+        blancs = pieces_restantes(WHITE)
+        noirs  = pieces_restantes(BLACK)
+
+        # Roi seul vs Roi seul
+        if len(blancs) == 0 and len(noirs) == 0:
+            return True
+
+        # Roi + piece mineure vs Roi seul
+        if len(blancs) == 0 and len(noirs) == 1 and isinstance(noirs[0], (Bishop, Knight)):
+            return True
+        if len(noirs) == 0 and len(blancs) == 1 and isinstance(blancs[0], (Bishop, Knight)):
+            return True
+
+        # Roi + Fou vs Roi + Fou (fous de meme couleur de case)
+        if (len(blancs) == 1 and len(noirs) == 1
+                and isinstance(blancs[0], Bishop)
+                and isinstance(noirs[0], Bishop)):
+            def couleur_case(pos):
+                return (pos.col_index() + pos.row_index()) % 2
+            if couleur_case(blancs[0].get_position()) == couleur_case(noirs[0].get_position()):
+                return True
+
+        return False
+
+    def save_game(self, filepath: str = SAVE_FILE):
+        # Convertit toute la partie en dictionnaire Python puis l'ecrit en JSON sur le disque
+        data = {
+            'board': self.board.to_dict(),
+            'players': [{'name': p.get_name(), 'color': p.get_color(),
+                         'is_ai': isinstance(p, AIPlayer)} for p in self.players],
+            'current_player_index': self.players.index(self.currentPlayer)
+        }
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load_game(self, filepath: str = SAVE_FILE) -> bool:
+        # Relit le fichier JSON et reconstruit le plateau + les joueurs
+        if not os.path.exists(filepath): return False
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        self.board   = Board.from_dict(data['board'])
+        self.players = []
+        for pd in data['players']:
+            cls = AIPlayer if pd['is_ai'] else Player
+            self.players.append(cls(pd['name'], pd['color']))
+        self.currentPlayer = self.players[data['current_player_index']]
+        return True
